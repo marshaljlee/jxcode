@@ -154,18 +154,35 @@ final class AppState {
 
     // MARK: - Model
 
-    static let availableModels = ["default", "best", "opus", "opus[1m]", "opusplan", "sonnet", "sonnet[1m]", "haiku"]
+    static let availableModels = [
+        "default", "best",
+        "claude-fable-5",
+        "opus", "claude-opus-4-8[1m]", "claude-opus-4-8", "claude-opus-4-7[1m]", "claude-opus-4-7", "claude-opus-4-6[1m]", "claude-opus-4-6", "opus[1m]", "opusplan",
+        "sonnet", "claude-sonnet-5", "claude-sonnet-4-6[1m]", "claude-sonnet-4-6", "sonnet[1m]",
+        "haiku", "claude-haiku-4-5"
+    ]
 
     static func modelDisplayName(_ model: String) -> String {
         switch model {
         case "default": return "Default"
         case "best": return "Best"
+        case "claude-fable-5": return "Fable 5"
         case "opus": return "Opus"
+        case "claude-opus-4-8[1m]": return "Opus 4.8 1M"
+        case "claude-opus-4-8": return "Opus 4.8"
+        case "claude-opus-4-7[1m]": return "Opus 4.7 1M"
+        case "claude-opus-4-7": return "Opus 4.7"
+        case "claude-opus-4-6[1m]": return "Opus 4.6 1M"
+        case "claude-opus-4-6": return "Opus 4.6"
         case "opus[1m]": return "Opus 1M"
         case "opusplan": return "Opus Plan"
         case "sonnet": return "Sonnet"
+        case "claude-sonnet-5": return "Sonnet 5"
+        case "claude-sonnet-4-6[1m]": return "Sonnet 4.6 1M"
+        case "claude-sonnet-4-6": return "Sonnet 4.6"
         case "sonnet[1m]": return "Sonnet 1M"
         case "haiku": return "Haiku"
+        case "claude-haiku-4-5": return "Haiku 4.5"
         default: return model.capitalized
         }
     }
@@ -175,12 +192,23 @@ final class AppState {
         switch model {
         case "default":   key = "model.desc.default"
         case "best":      key = "model.desc.best"
+        case "claude-fable-5": return "Fable 5 — Most powerful model"
         case "opus":      key = "model.desc.opus"
+        case "claude-opus-4-8[1m]": return "Opus 4.8 with 1M context window"
+        case "claude-opus-4-8": return "Opus 4.8 — Latest Opus release"
+        case "claude-opus-4-7[1m]": return "Opus 4.7 with 1M context window"
+        case "claude-opus-4-7": return "Opus 4.7 — Previous Opus release"
+        case "claude-opus-4-6[1m]": return "Opus 4.6 with 1M context window"
+        case "claude-opus-4-6": return "Opus 4.6 — Most capable for complex work"
         case "opus[1m]":  key = "model.desc.opus1m"
         case "opusplan":  key = "model.desc.opusplan"
         case "sonnet":    key = "model.desc.sonnet"
+        case "claude-sonnet-5": return "Sonnet 5 — Best for everyday tasks"
+        case "claude-sonnet-4-6[1m]": return "Sonnet 4.6 with 1M context window"
+        case "claude-sonnet-4-6": return "Sonnet 4.6 — Best for everyday tasks"
         case "sonnet[1m]": key = "model.desc.sonnet1m"
         case "haiku":     key = "model.desc.haiku"
+        case "claude-haiku-4-5": return "Haiku 4.5 — Fastest for quick answers"
         default: return ""
         }
         return NSLocalizedString(key, comment: "")
