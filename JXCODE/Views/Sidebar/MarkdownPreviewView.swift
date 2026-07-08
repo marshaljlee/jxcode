@@ -43,7 +43,7 @@ struct MarkdownPreviewView: NSViewRepresentable {
         </head>
         <body>
         <div id="root"></div>
-        <script>const __CLARC_MD__ = \(jsonString);</script>
+        <script>const __JXCODE_MD__ = \(jsonString);</script>
         <script>\(Self.jsParser)</script>
         </body>
         </html>
@@ -223,7 +223,7 @@ struct MarkdownPreviewView: NSViewRepresentable {
             return s;
         }
 
-        document.getElementById('root').innerHTML = parseBlocks(__CLARC_MD__);
+        document.getElementById('root').innerHTML = parseBlocks(__JXCODE_MD__);
     })();
     """#
 }

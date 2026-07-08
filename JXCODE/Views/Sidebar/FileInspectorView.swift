@@ -373,7 +373,7 @@ private struct CodeTextRenderer: NSViewRepresentable {
         private func registerThemeObserver() {
             guard themeObserver == nil else { return }
             themeObserver = NotificationCenter.default.addObserver(
-                forName: .clarcThemeDidChange,
+                forName: .jxcodeThemeDidChange,
                 object: nil,
                 queue: .main
             ) { [weak self] _ in

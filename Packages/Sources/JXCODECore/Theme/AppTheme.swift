@@ -274,15 +274,81 @@ extension ThemeColors {
     }()
 }
 
+extension ThemeColors {
+    public static let brainwave: ThemeColors = {
+        return ThemeColors(
+            accent:               Color.hex(0x4A90D9),
+            accentSubtle:         Color.hex(0x4A90D9, opacity: 0.15),
+            background:           Color.hex(0x0A0A12),
+            surfacePrimary:       Color.hex(0x11111D),
+            surfaceSecondary:     Color.hex(0x151525),
+            surfaceTertiary:      Color.hex(0x0D0D18),
+            surfaceElevated:      Color.hex(0x18182A),
+            sidebarBackground:    Color.hex(0x08080F),
+            sidebarItemHover:     Color.hex(0x11111D),
+            sidebarItemSelected:  Color.hex(0x4A90D9, opacity: 0.12),
+            textPrimary:          Color.hex(0xE8E8F0),
+            textSecondary:        Color.hex(0x9898B0),
+            textTertiary:         Color.hex(0x5C5C78),
+            border:               Color.hex(0x1A1A30),
+            borderSubtle:         Color.hex(0x151525),
+            codeBackground:       Color.hex(0x0D0D18),
+            codeHeaderBackground: Color.hex(0x08080F),
+            userBubble:           Color.hex(0x1A1A30),
+            userBubbleText:       Color.hex(0x00D4FF),
+            assistantBubble:      Color.hex(0x11111D),
+            statusSuccess:        Color.hex(0x00D4AA),
+            statusError:          Color.hex(0xFF3B6F),
+            statusWarning:        Color.hex(0xFFB347),
+            inputBackground:      Color.hex(0x11111D),
+            inputBorder:          Color.hex(0x1A1A30)
+        )
+    }()
+}
+
+extension ThemeColors {
+    public static let brainwaveLight: ThemeColors = {
+        return ThemeColors(
+            accent:               Color.hex(0x4A90D9),
+            accentSubtle:         Color.hex(0x4A90D9, opacity: 0.12),
+            background:           Color.hex(0xF0F2F8),
+            surfacePrimary:       Color.hex(0xE8EBF5),
+            surfaceSecondary:     Color.hex(0xE0E4F0),
+            surfaceTertiary:      Color.hex(0xD8DCEB),
+            surfaceElevated:      Color.hex(0xF5F7FC),
+            sidebarBackground:    Color.hex(0xE5E7F0),
+            sidebarItemHover:     Color.hex(0xDEE2EE),
+            sidebarItemSelected:  Color.hex(0x4A90D9, opacity: 0.10),
+            textPrimary:          Color.hex(0x1A1A2E),
+            textSecondary:        Color.hex(0x50506E),
+            textTertiary:         Color.hex(0x7878A0),
+            border:               Color.hex(0xC8CCE0),
+            borderSubtle:         Color.hex(0xDEE2EE),
+            codeBackground:       Color.hex(0xE0E3F0),
+            codeHeaderBackground: Color.hex(0xD4D8E8),
+            userBubble:           Color.hex(0x1A1A2E),
+            userBubbleText:       Color.hex(0xE8E8F0),
+            assistantBubble:      Color.hex(0xE0E3F0),
+            statusSuccess:        Color.hex(0x2E8A6A),
+            statusError:          Color.hex(0xCC3355),
+            statusWarning:        Color.hex(0xCC9430),
+            inputBackground:      Color.hex(0xF5F7FC),
+            inputBorder:          Color.hex(0xC8CCE0)
+        )
+    }()
+}
+
 // MARK: - App Theme Enum
 
 public enum AppTheme: String, CaseIterable, Identifiable {
-    case claude   = "Terracotta"
-    case ocean    = "Ocean"
-    case forest   = "Forest"
-    case lavender = "Lavender"
-    case midnight = "Midnight"
-    case amber    = "Amber"
+    case claude       = "Terracotta"
+    case ocean        = "Ocean"
+    case forest       = "Forest"
+    case lavender     = "Lavender"
+    case midnight     = "Midnight"
+    case amber        = "Amber"
+    case brainwave    = "Brainwave (Dark)"
+    case brainwaveLight = "Brainwave (Light)"
 
     public var id: String { rawValue }
 
@@ -294,6 +360,8 @@ public enum AppTheme: String, CaseIterable, Identifiable {
         case .lavender: "Lavender (Purple)"
         case .midnight: "Midnight (Indigo)"
         case .amber:    "Amber (Yellow)"
+        case .brainwave: "Brainwave (Dark)"
+        case .brainwaveLight: "Brainwave (Light)"
         }
     }
 
@@ -305,6 +373,8 @@ public enum AppTheme: String, CaseIterable, Identifiable {
         case .lavender: .lavender
         case .midnight: .midnight
         case .amber:    .amber
+        case .brainwave: .brainwave
+        case .brainwaveLight: .brainwaveLight
         }
     }
 }
@@ -312,7 +382,7 @@ public enum AppTheme: String, CaseIterable, Identifiable {
 // MARK: - Theme Store
 
 public extension Notification.Name {
-    static let clarcThemeDidChange = Notification.Name("com.clarc.themeDidChange")
+    static let jxcodeThemeDidChange = Notification.Name("com.idealapp.jxcode.themeDidChange")
 }
 
 @MainActor
@@ -323,7 +393,7 @@ public final class ThemeStore {
     public var current: AppTheme = .claude {
         didSet {
             colors = current.colors
-            NotificationCenter.default.post(name: .clarcThemeDidChange, object: nil)
+            NotificationCenter.default.post(name: .jxcodeThemeDidChange, object: nil)
         }
     }
     public var colors: ThemeColors = .claude

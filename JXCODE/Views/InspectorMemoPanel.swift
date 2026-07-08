@@ -2,8 +2,8 @@ import SwiftUI
 import AppKit
 import JXCODECore
 
-private let memoArchiveKey = "clarc.memoAttrData"
-private let checkboxStateKey = NSAttributedString.Key("clarc.checkboxState")
+private let memoArchiveKey = "jxcode.memoAttrData"
+private let checkboxStateKey = NSAttributedString.Key("jxcode.checkboxState")
 
 private let defaultMemoFont: NSFont = .jetBrainsMono(size: 11)
 private let defaultMemoParagraphStyle: NSParagraphStyle = {

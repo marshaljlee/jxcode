@@ -16,7 +16,7 @@ private final class RenderGroupCache: @unchecked Sendable {
 
     init() {
         cache.countLimit = 200
-        NotificationCenter.default.addObserver(forName: .clarcThemeDidChange, object: nil, queue: .main) { [weak self] _ in
+        NotificationCenter.default.addObserver(forName: .jxcodeThemeDidChange, object: nil, queue: .main) { [weak self] _ in
             self?.cache.removeAllObjects()
         }
     }

@@ -81,7 +81,7 @@ public class ProxyManager {
         self.apiKey = env["OPENAI_API_KEY"] ?? env["NVIDIA_API_KEY"] ?? ""
         self.customHostUrl = env["LOCAL_LLM_BASE_URL"] ?? env["OPENAI_BASE_URL"] ?? ""
         
-        self.isRunnerActive = UserDefaults.standard.bool(forKey: "clarc.proxyRunnerActive")
+        self.isRunnerActive = UserDefaults.standard.bool(forKey: "jxcode.proxyRunnerActive")
         if self.isRunnerActive && process == nil {
             // Relaunch runner if it was previously active
             Task {
@@ -144,7 +144,7 @@ public class ProxyManager {
             try proc.run()
             self.process = proc
             self.isRunnerActive = true
-            UserDefaults.standard.set(true, forKey: "clarc.proxyRunnerActive")
+            UserDefaults.standard.set(true, forKey: "jxcode.proxyRunnerActive")
             
             try? await Task.sleep(nanoseconds: 1_000_000_000) // wait for server to bind
             await checkStatus()
@@ -158,7 +158,7 @@ public class ProxyManager {
         process = nil
         self.isRunnerActive = false
         self.latency = 0.0
-        UserDefaults.standard.set(false, forKey: "clarc.proxyRunnerActive")
+        UserDefaults.standard.set(false, forKey: "jxcode.proxyRunnerActive")
         
         // Also stop it using CLI if running independently
         if let binary = jxproxyBinary {

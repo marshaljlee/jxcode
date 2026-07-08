@@ -101,7 +101,7 @@ public enum AttachmentFactory {
             guard attachment.type == .image, attachment.path.isEmpty,
                   let data = attachment.imageData else { return attachment }
             let tmpURL = FileManager.default.temporaryDirectory
-                .appendingPathComponent("clarc-img-\(UUID().uuidString.prefix(8)).png")
+                .appendingPathComponent("jxcode-img-\(UUID().uuidString.prefix(8)).png")
             guard (try? data.write(to: tmpURL)) != nil else { return attachment }
             tempPaths.append(tmpURL.path)
             return Attachment(id: attachment.id, type: .image, name: attachment.name,
