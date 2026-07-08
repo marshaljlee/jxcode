@@ -104,19 +104,20 @@ struct ProxySettingsTab: View {
                     HStack(spacing: 8) {
                         Circle()
                             .fill(Color.green)
-                            .frame(width: 8, height: 8)
-                        Text("Active at http://127.0.0.1:\(pm.proxyPort)")
-                            .font(.system(size: 11))
-                            .foregroundStyle(ClaudeTheme.textSecondary)
-                        if pm.latency > 0 {
-                            Text("(\(Int(pm.latency))ms latency)")
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(ClaudeTheme.textTertiary)
-                        }
+                            .frame(width: 10, height: 10)
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     .background(Color.green.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                } else {
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(Color.red)
+                            .frame(width: 10, height: 10)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
                 }
                 
                 VStack(spacing: 12) {
