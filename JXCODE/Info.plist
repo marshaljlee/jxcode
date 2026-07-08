@@ -30,5 +30,7 @@
 	<string>https://raw.githubusercontent.com/ttnear/JXCODE/main/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>o1+OjC4eJrHnvmfwRxGPhH8OQFD21WYlxkFndh+4J0M=</string>
+	<key>ATSApplicationFontsPath</key>
+		<string>Fonts</string>
 </dict>
 </plist>
