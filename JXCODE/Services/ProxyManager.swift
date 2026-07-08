@@ -21,10 +21,12 @@ public class ProxyManager {
     // Tab 2: Runner Fields
     public var selectedProvider: String = "OpenCode Zen / Big-Pickle"
     public var selectedModel: String = "opencode/zen-coder"
-    public var proxyPort: Int = 5529
+    public var proxyPort: Int = 5255
     public var apiKey: String = ""
     public var customHostUrl: String = ""
     public var latency: Double = 0.0
+    /// True when any process responds on the proxy port (not just the app-launched runner).
+    public var isPortActive: Bool = false
     
     // MARK: - Paths
     private var configPath: String {
@@ -72,7 +74,7 @@ public class ProxyManager {
         if let portStr = env["JXPROXY_PORT"], let port = Int(portStr) {
             self.proxyPort = port
         } else {
-            self.proxyPort = 5529
+            self.proxyPort = 5255
         }
         
         let providerVal = env["JXPROXY_PROVIDER"] ?? "direct"
@@ -92,13 +94,15 @@ public class ProxyManager {
     
     public func saveConfig() {
         do {
-            try EnvFileParser.update(filePath: configPath, key: "PROXY_ENABLED", value: isProxyEnabled ? "true" : "false")
-            try EnvFileParser.update(filePath: configPath, key: "HTTP_PROXY", value: httpProxy)
-            try EnvFileParser.update(filePath: configPath, key: "HTTPS_PROXY", value: httpsProxy)
-            try EnvFileParser.update(filePath: configPath, key: "NO_PROXY", value: noProxy)
-            try EnvFileParser.update(filePath: configPath, key: "ALL_PROXY", value: allProxy)
-            
+            let effectiveProxy = isProxyEnabled || isRunnerActive
+            try EnvFileParser.update(filePath: configPath, key: "PROXY_ENABLED", value: effectiveProxy ? "true" : "false")
+            try EnvFileParser.update(filePath: configPath, key: "HTTP_PROXY", value: isProxyEnabled ? httpProxy : "")
+            try EnvFileParser.update(filePath: configPath, key: "HTTPS_PROXY", value: isProxyEnabled ? httpsProxy : "")
+            try EnvFileParser.update(filePath: configPath, key: "NO_PROXY", value: isProxyEnabled ? noProxy : "")
+            try EnvFileParser.update(filePath: configPath, key: "ALL_PROXY", value: isProxyEnabled ? allProxy : "")
+
             try EnvFileParser.update(filePath: configPath, key: "JXPROXY_PORT", value: String(proxyPort))
+            try EnvFileParser.update(filePath: configPath, key: "ANTHROPIC_BASE_URL", value: "http://127.0.0.1:\(proxyPort)/v1")
             
             let providerVal = canonicalProviderValue(for: selectedProvider)
             try EnvFileParser.update(filePath: configPath, key: "JXPROXY_PROVIDER", value: providerVal)
@@ -120,6 +124,7 @@ public class ProxyManager {
     
     // MARK: - Runner Controls
     public func startRunner() async {
+        isProxyEnabled = true
         saveConfig()
         guard process == nil else { return }
         
@@ -157,9 +162,8 @@ public class ProxyManager {
         process?.terminate()
         process = nil
         self.isRunnerActive = false
-        self.latency = 0.0
         UserDefaults.standard.set(false, forKey: "jxcode.proxyRunnerActive")
-        
+
         // Also stop it using CLI if running independently
         if let binary = jxproxyBinary {
             let proc = Process()
@@ -168,38 +172,47 @@ public class ProxyManager {
             try? proc.run()
             proc.waitUntilExit()
         }
+
+        // Don't clear latency/status if an external proxy is still on the port —
+        // the monitoring loop will update isPortActive on its next tick.
     }
     
     // MARK: - Monitoring
     private func checkStatus() async {
-        guard isRunnerActive else { return }
         let urlString = "http://127.0.0.1:\(proxyPort)/health"
         guard let url = URL(string: urlString) else { return }
-        
+
         let startTime = Date()
         var request = URLRequest(url: url)
         request.timeoutInterval = 0.8
-        
+
         do {
             let (_, response) = try await URLSession.shared.data(for: request)
             if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
                 self.latency = Date().timeIntervalSince(startTime) * 1000.0
+                self.isPortActive = true
             } else {
                 self.latency = 0.0
+                self.isPortActive = false
             }
         } catch {
             self.latency = 0.0
+            self.isPortActive = false
         }
     }
-    
+
+    /// Returns true when either the app-launched runner is active, or an
+    /// external process is responding on the proxy port.
+    public var effectiveProxyActive: Bool {
+        isRunnerActive || isPortActive
+    }
+
     private func startMonitoring() {
         monitorTask?.cancel()
         monitorTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self = self else { break }
-                if await self.isRunnerActive {
-                    await self.checkStatus()
-                }
+                await self.checkStatus()
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
             }
         }

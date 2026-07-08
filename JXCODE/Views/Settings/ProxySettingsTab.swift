@@ -100,25 +100,15 @@ struct ProxySettingsTab: View {
                     .buttonStyle(.plain)
                 }
                 
-                if pm.isRunnerActive {
-                    HStack(spacing: 8) {
-                        Circle()
-                            .fill(Color.green)
-                            .frame(width: 10, height: 10)
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.green.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
-                } else {
-                    HStack(spacing: 8) {
-                        Circle()
-                            .fill(Color.red)
-                            .frame(width: 10, height: 10)
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                // Status light: green when ANY process responds on the proxy port
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(pm.effectiveProxyActive ? Color.green : Color.red)
+                        .frame(width: 10, height: 10)
                 }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background((pm.effectiveProxyActive ? Color.green : Color.red).opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
                 
                 VStack(spacing: 12) {
                     HStack {

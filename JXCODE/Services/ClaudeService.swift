@@ -148,32 +148,35 @@ actor ClaudeService {
 
     /// Build the full environment dictionary for spawned subprocesses,
     /// inheriting the GUI environment but with PATH replaced by ``resolvedShellPath()``.
-    private func resolvedEnvironment() async -> [String: String] {
-        var env = ProcessInfo.processInfo.environment
-        env["PATH"] = await resolvedShellPath()
-        
-        let pm = ProxyManager.shared
-        let isRunnerActive = await pm.isRunnerActive
-        let proxyPort = await pm.proxyPort
-        
-        if isRunnerActive {
-            env["HTTP_PROXY"] = "http://127.0.0.1:\(proxyPort)"
-            env["HTTPS_PROXY"] = "http://127.0.0.1:\(proxyPort)"
-            env["ANTHROPIC_BASE_URL"] = "http://127.0.0.1:\(proxyPort)/v1"
-        } else if await pm.isProxyEnabled {
-            let httpProxy = await pm.httpProxy
-            let httpsProxy = await pm.httpsProxy
-            let noProxy = await pm.noProxy
-            let allProxy = await pm.allProxy
-            
-            if !httpProxy.isEmpty { env["HTTP_PROXY"] = httpProxy }
-            if !httpsProxy.isEmpty { env["HTTPS_PROXY"] = httpsProxy }
-            if !noProxy.isEmpty { env["NO_PROXY"] = noProxy }
-            if !allProxy.isEmpty { env["ALL_PROXY"] = allProxy }
-        }
-        
-        return env
-    }
+	private func resolvedEnvironment() async -> [String: String] {
+		var env = ProcessInfo.processInfo.environment
+		env["PATH"] = await resolvedShellPath()
+		
+		let pm = ProxyManager.shared
+		let proxyActive = await pm.effectiveProxyActive
+		let proxyPort = await pm.proxyPort
+		
+		if proxyActive {
+			env["HTTP_PROXY"] = "http://127.0.0.1:\(proxyPort)"
+			env["HTTPS_PROXY"] = "http://127.0.0.1:\(proxyPort)"
+			env["ANTHROPIC_BASE_URL"] = "http://127.0.0.1:\(proxyPort)/v1"
+			env["ANTHROPIC_AUTH_TOKEN"] = "jxproxy"
+		} else if await pm.isProxyEnabled {
+			let httpProxy = await pm.httpProxy
+			let httpsProxy = await pm.httpsProxy
+			let noProxy = await pm.noProxy
+			let allProxy = await pm.allProxy
+			
+			if !httpProxy.isEmpty { env["HTTP_PROXY"] = httpProxy }
+			if !httpsProxy.isEmpty { env["HTTPS_PROXY"] = httpsProxy }
+			if !noProxy.isEmpty { env["NO_PROXY"] = noProxy }
+			if !allProxy.isEmpty { env["ALL_PROXY"] = allProxy }
+			env["ANTHROPIC_BASE_URL"] = "http://127.0.0.1:\(proxyPort)/v1"
+			env["ANTHROPIC_AUTH_TOKEN"] = "jxproxy"
+		}
+		
+		return env
+	}
 
     // MARK: - Binary Discovery
 
