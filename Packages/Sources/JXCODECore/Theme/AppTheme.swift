@@ -276,64 +276,69 @@ extension ThemeColors {
 
 extension ThemeColors {
     public static let brainwave: ThemeColors = {
+        // Neon brainwave / EEG visualization palette:
+        // electric cyan accent on deep navy with teal/purple complements
+        let accent: Color = Color.hex(0x00D4FF) // electric cyan
         return ThemeColors(
-            accent:               Color.hex(0x4A90D9),
-            accentSubtle:         Color.hex(0x4A90D9, opacity: 0.15),
-            background:           Color.hex(0x0A0A12),
-            surfacePrimary:       Color.hex(0x11111D),
-            surfaceSecondary:     Color.hex(0x151525),
-            surfaceTertiary:      Color.hex(0x0D0D18),
-            surfaceElevated:      Color.hex(0x18182A),
-            sidebarBackground:    Color.hex(0x08080F),
-            sidebarItemHover:     Color.hex(0x11111D),
-            sidebarItemSelected:  Color.hex(0x4A90D9, opacity: 0.12),
-            textPrimary:          Color.hex(0xE8E8F0),
-            textSecondary:        Color.hex(0x9898B0),
-            textTertiary:         Color.hex(0x5C5C78),
-            border:               Color.hex(0x1A1A30),
-            borderSubtle:         Color.hex(0x151525),
-            codeBackground:       Color.hex(0x0D0D18),
-            codeHeaderBackground: Color.hex(0x08080F),
-            userBubble:           Color.hex(0x1A1A30),
-            userBubbleText:       Color.hex(0x00D4FF),
-            assistantBubble:      Color.hex(0x11111D),
-            statusSuccess:        Color.hex(0x00D4AA),
-            statusError:          Color.hex(0xFF3B6F),
-            statusWarning:        Color.hex(0xFFB347),
-            inputBackground:      Color.hex(0x11111D),
-            inputBorder:          Color.hex(0x1A1A30)
+            accent:               accent,
+            accentSubtle:         accent.opacity(0.15),
+            background:           Color.hex(0x050B14), // deep navy black
+            surfacePrimary:       Color.hex(0x0C1522),
+            surfaceSecondary:     Color.hex(0x111D30),
+            surfaceTertiary:      Color.hex(0x0A121E),
+            surfaceElevated:      Color.hex(0x15233A),
+            sidebarBackground:    Color.hex(0x03070E),
+            sidebarItemHover:     Color.hex(0x0C1522),
+            sidebarItemSelected:  accent.opacity(0.15),
+            textPrimary:          Color.hex(0xE0E8F0),
+            textSecondary:        Color.hex(0x8098B8),
+            textTertiary:         Color.hex(0x4A6588),
+            border:               Color.hex(0x1A2A42),
+            borderSubtle:         Color.hex(0x111D30),
+            codeBackground:       Color.hex(0x0A121E),
+            codeHeaderBackground: Color.hex(0x050A14),
+            userBubble:           Color.hex(0x15233A),
+            userBubbleText:       Color.hex(0x00D4FF), // electric cyan
+            assistantBubble:      Color.hex(0x0C1522),
+            statusSuccess:        Color.hex(0x00E5B0), // bright teal
+            statusError:          Color.hex(0xFF4060), // coral
+            statusWarning:        Color.hex(0xFFB020), // warm amber
+            inputBackground:      Color.hex(0x0C1522),
+            inputBorder:          Color.hex(0x1A2A42)
         )
     }()
 }
 
 extension ThemeColors {
     public static let brainwaveLight: ThemeColors = {
+        // Light counterpart: icy blue-white foundations with electric cyan accent,
+        // deep navy user bubble echoing the dark brainwave palette
         return ThemeColors(
-            accent:               Color.hex(0x4A90D9),
-            accentSubtle:         Color.hex(0x4A90D9, opacity: 0.12),
-            background:           Color.hex(0xF0F2F8),
-            surfacePrimary:       Color.hex(0xE8EBF5),
-            surfaceSecondary:     Color.hex(0xE0E4F0),
-            surfaceTertiary:      Color.hex(0xD8DCEB),
-            surfaceElevated:      Color.hex(0xF5F7FC),
-            sidebarBackground:    Color.hex(0xE5E7F0),
-            sidebarItemHover:     Color.hex(0xDEE2EE),
-            sidebarItemSelected:  Color.hex(0x4A90D9, opacity: 0.10),
-            textPrimary:          Color.hex(0x1A1A2E),
-            textSecondary:        Color.hex(0x50506E),
-            textTertiary:         Color.hex(0x7878A0),
-            border:               Color.hex(0xC8CCE0),
-            borderSubtle:         Color.hex(0xDEE2EE),
-            codeBackground:       Color.hex(0xE0E3F0),
-            codeHeaderBackground: Color.hex(0xD4D8E8),
-            userBubble:           Color.hex(0x1A1A2E),
-            userBubbleText:       Color.hex(0xE8E8F0),
-            assistantBubble:      Color.hex(0xE0E3F0),
-            statusSuccess:        Color.hex(0x2E8A6A),
-            statusError:          Color.hex(0xCC3355),
-            statusWarning:        Color.hex(0xCC9430),
-            inputBackground:      Color.hex(0xF5F7FC),
-            inputBorder:          Color.hex(0xC8CCE0)
+            accent:               Color.hex(0x0088CC), // deeper cyan for light mode contrast
+            accentSubtle:         Color.hex(0x0088CC, opacity: 0.10),
+            background:           Color.hex(0xF0F4FA), // icy blue-white
+            surfacePrimary:       Color.hex(0xE8EEF6),
+            surfaceSecondary:     Color.hex(0xE0E8F2),
+            surfaceTertiary:      Color.hex(0xD8E2EE),
+            surfaceElevated:      Color.hex(0xF6FAFF),
+            sidebarBackground:    Color.hex(0xE0E8F2),
+            sidebarItemHover:     Color.hex(0xD8E2EE),
+            sidebarItemSelected:  Color.hex(0x0088CC, opacity: 0.08),
+            textPrimary:          Color.hex(0x0A1420),
+            textSecondary:        Color.hex(0x406080),
+            textTertiary:         Color.hex(0x7090B0),
+            border:               Color.hex(0xC0D0E0),
+            borderSubtle:         Color.hex(0xD8E2EE),
+            codeBackground:       Color.hex(0xE0EAF4),
+            codeHeaderBackground: Color.hex(0xD4E0EE),
+            userBubble:           Color.hex(0x0A1420),
+            userBubbleText:       Color.hex(0xE0E8F0),
+            assistantBubble:      Color.hex(0xE0EAF4),
+            statusSuccess:        Color.hex(0x00997A), // teal
+            statusError:          Color.hex(0xD0404A), // red
+            statusWarning:        Color.hex(0xD09020), // amber
+            inputBackground:      Color.hex(0xF6FAFF),
+            inputBorder:          Color.hex(0xC0D0E0)
         )
     }()
 }
@@ -347,7 +352,7 @@ public enum AppTheme: String, CaseIterable, Identifiable {
     case lavender     = "Lavender"
     case midnight     = "Midnight"
     case amber        = "Amber"
-    case brainwave    = "Brainwave (Dark)"
+    case brainwaveDark  = "Brainwave (Dark)"
     case brainwaveLight = "Brainwave (Light)"
 
     public var id: String { rawValue }
@@ -360,7 +365,7 @@ public enum AppTheme: String, CaseIterable, Identifiable {
         case .lavender: "Lavender (Purple)"
         case .midnight: "Midnight (Indigo)"
         case .amber:    "Amber (Yellow)"
-        case .brainwave: "Brainwave (Dark)"
+        case .brainwaveDark: "Brainwave (Dark)"
         case .brainwaveLight: "Brainwave (Light)"
         }
     }
@@ -373,7 +378,7 @@ public enum AppTheme: String, CaseIterable, Identifiable {
         case .lavender: .lavender
         case .midnight: .midnight
         case .amber:    .amber
-        case .brainwave: .brainwave
+        case .brainwaveDark: .brainwave
         case .brainwaveLight: .brainwaveLight
         }
     }
@@ -398,8 +403,15 @@ public final class ThemeStore {
     }
     public var colors: ThemeColors = .claude
 
-    public static let minFontSizeAdjustment: Int = -5
-    public static let maxFontSizeAdjustment: Int = 8
-    public var fontSizeAdjustment: Int = 0
-    public var messageFontSizeAdjustment: Int = 0
+    /// Absolute interface font size (default 12). Affects all labels, buttons, tooltips.
+    public var interfaceFontSize: CGFloat = 12 {
+        didSet { NotificationCenter.default.post(name: .jxcodeThemeDidChange, object: nil) }
+    }
+    /// Absolute message content font size (default 12). Affects chat bubbles, code blocks.
+    public var messageFontSize: CGFloat = 12 {
+        didSet { NotificationCenter.default.post(name: .jxcodeThemeDidChange, object: nil) }
+    }
+
+    public static let minFontSize: CGFloat = 8
+    public static let maxFontSize: CGFloat = 24
 }

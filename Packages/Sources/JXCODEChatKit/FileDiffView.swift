@@ -42,7 +42,7 @@ public struct FileDiffView: View {
                 .foregroundStyle(ClaudeTheme.accent)
 
             Text(fileName)
-                .font(.system(size: ClaudeTheme.messageSize(13), weight: .semibold, design: .monospaced))
+                .font(.custom("JetBrains Mono NL", size: ClaudeTheme.messageSize(13)).weight(.semibold))
                 .foregroundStyle(ClaudeTheme.textPrimary)
                 .lineLimit(1)
                 .truncationMode(.middle)

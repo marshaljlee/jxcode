@@ -30,6 +30,10 @@ public struct PaseoAppearanceTab: View {
                 Divider()
                 displayOptions
                 Divider()
+                notificationsSection
+                Divider()
+                panelLayoutSection
+                Divider()
                 previewSection
             }
             .padding(24)
@@ -122,7 +126,7 @@ public struct PaseoAppearanceTab: View {
 
             Slider(
                 value: $interfaceFontSize,
-                in: 9...18,
+                in: Double(ThemeStore.minFontSize)...Double(ThemeStore.maxFontSize),
                 step: 1
             ) {
                 EmptyView()
@@ -133,8 +137,7 @@ public struct PaseoAppearanceTab: View {
             }
             .tint(ClaudeTheme.accent)
             .onChange(of: interfaceFontSize) { _, newValue in
-                let adjustment = Int(newValue) - 11
-                appState.fontSizeAdjustment = adjustment
+                appState.interfaceFontSize = newValue
             }
         }
     }
@@ -154,7 +157,7 @@ public struct PaseoAppearanceTab: View {
 
             Slider(
                 value: $messageFontSize,
-                in: 9...18,
+                in: Double(ThemeStore.minFontSize)...Double(ThemeStore.maxFontSize),
                 step: 1
             ) {
                 EmptyView()
@@ -165,8 +168,7 @@ public struct PaseoAppearanceTab: View {
             }
             .tint(ClaudeTheme.accent)
             .onChange(of: messageFontSize) { _, newValue in
-                let adjustment = Int(newValue) - 11
-                appState.messageFontSizeAdjustment = adjustment
+                appState.messageFontSize = newValue
             }
         }
     }
@@ -213,7 +215,7 @@ public struct PaseoAppearanceTab: View {
                             )
 
                         Text(customAccentColor.hexString)
-                            .font(.system(size: ClaudeTheme.size(11), design: .monospaced))
+                            .font(.custom("JetBrains Mono NL", size: ClaudeTheme.size(11)))
                             .foregroundStyle(.secondary)
 
                         Spacer()
@@ -273,6 +275,45 @@ public struct PaseoAppearanceTab: View {
         }
     }
 
+    // MARK: - Notifications
+
+    private var notificationsSection: some View {
+        @Bindable var appState = appState
+        return VStack(alignment: .leading, spacing: 12) {
+            Text("Notifications")
+                .font(.system(size: ClaudeTheme.size(13), weight: .semibold))
+            Toggle(isOn: $appState.notificationsEnabled) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Notify when response completes").font(.system(size: ClaudeTheme.size(13)))
+                    Text("Sends a system notification while JXCODE is in the background.").font(.system(size: ClaudeTheme.size(11))).foregroundStyle(.secondary)
+                }
+            }.toggleStyle(.switch)
+        }
+    }
+
+    // MARK: - Panel Layout
+
+    private var panelLayoutSection: some View {
+        @Bindable var appState = appState
+        return VStack(alignment: .leading, spacing: 12) {
+            Text("Panel Layout")
+                .font(.system(size: ClaudeTheme.size(13), weight: .semibold))
+            Text("Choose where the memo and terminal panel is docked.")
+                .font(.system(size: ClaudeTheme.size(11)))
+                .foregroundStyle(.secondary)
+            Picker("", selection: $appState.inspectorPosition) {
+                Text("Right").tag(InspectorPosition.right)
+                Text("Bottom").tag(InspectorPosition.bottom)
+            }.labelsHidden().pickerStyle(.segmented).fixedSize()
+            Toggle(isOn: $appState.inspectorShowBoth) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Show memo and terminal together").font(.system(size: ClaudeTheme.size(13)))
+                    Text("Splits the panel in two.").font(.system(size: ClaudeTheme.size(11))).foregroundStyle(.secondary)
+                }
+            }.toggleStyle(.switch)
+        }
+    }
+
     // MARK: - Preview
 
     private var previewSection: some View {
@@ -314,9 +355,9 @@ public struct PaseoAppearanceTab: View {
             applyCustomAccent(customAccentColor)
         }
 
-        // Rebuild font-size from the adjustment stored in appState
-        interfaceFontSize = Double(11 + appState.fontSizeAdjustment)
-        messageFontSize = Double(11 + appState.messageFontSizeAdjustment)
+        // Read absolute font sizes from appState
+        interfaceFontSize = appState.interfaceFontSize
+        messageFontSize = appState.messageFontSize
     }
 
     private func persistCustomAccent(_ color: Color) {

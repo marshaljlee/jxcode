@@ -55,11 +55,13 @@ public enum ClaudeTheme {
 
     // MARK: - Font Size
     public static func size(_ base: CGFloat) -> CGFloat {
-        return 11
+        let fontSize = ThemeStore.shared.interfaceFontSize
+        return max(ThemeStore.minFontSize, fontSize + (base - 13))
     }
 
     public static func messageSize(_ base: CGFloat) -> CGFloat {
-        return 11
+        let fontSize = ThemeStore.shared.messageFontSize
+        return max(ThemeStore.minFontSize, fontSize + (base - 11))
     }
 
     // MARK: - Dimensions
@@ -236,30 +238,14 @@ public struct ClaudeThemeDivider: View {
     }
 }
 
-// MARK: - Global Font Overrides to JetBrains Mono NL 11
+// MARK: - JetBrains Mono Font Helpers
 public extension Font {
-    static func system(size: CGFloat) -> Font {
-        return .custom("JetBrains Mono NL", size: 11)
+    static func jetBrainsMono(size: CGFloat) -> Font {
+        return .custom("JetBrains Mono NL", size: size)
     }
-    
-    static func system(size: CGFloat, weight: Font.Weight) -> Font {
-        return .custom("JetBrains Mono NL", size: 11).weight(weight)
-    }
-    
-    static func system(size: CGFloat, weight: Font.Weight, design: Font.Design) -> Font {
-        return .custom("JetBrains Mono NL", size: 11).weight(weight)
-    }
-    
-    static func system(size: CGFloat, design: Font.Design) -> Font {
-        return .custom("JetBrains Mono NL", size: 11)
-    }
-    
-    static func system(_ style: Font.TextStyle) -> Font {
-        return .custom("JetBrains Mono NL", size: 11)
-    }
-    
-    static func system(_ style: Font.TextStyle, design: Font.Design) -> Font {
-        return .custom("JetBrains Mono NL", size: 11)
+
+    static func jetBrainsMono(size: CGFloat, weight: Font.Weight) -> Font {
+        return .custom("JetBrains Mono NL", size: size).weight(weight)
     }
 }
 

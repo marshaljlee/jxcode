@@ -60,7 +60,7 @@ struct StatusLineView: View {
             }
             .foregroundStyle(ClaudeTheme.textTertiary)
         }
-        .font(.system(size: ClaudeTheme.size(12), weight: .medium, design: .monospaced))
+        .font(.custom("JetBrains Mono NL", size: ClaudeTheme.size(12)).weight(.medium))
         .padding(.leading, 12)
         .padding(.trailing, 20)
         .frame(height: 28)

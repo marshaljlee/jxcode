@@ -126,7 +126,7 @@ private struct ManualKeyValueRow: View {
                     .frame(width: 28, height: 20)
             } else {
                 Text(key)
-                    .font(.system(size: ClaudeTheme.size(12), weight: .medium, design: .monospaced))
+                    .font(.custom("JetBrains Mono NL", size: ClaudeTheme.size(12)).weight(.medium))
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(Color(NSColor.controlBackgroundColor))

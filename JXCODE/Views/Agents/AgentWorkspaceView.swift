@@ -212,7 +212,7 @@ struct AgentWorkspaceView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         Text(runLog)
-                            .font(.system(.body, design: .monospaced))
+                            .font(.custom("JetBrains Mono NL", size: ClaudeTheme.messageSize(11)))
                             .foregroundStyle(ClaudeTheme.textPrimary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(16)

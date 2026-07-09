@@ -66,7 +66,7 @@ struct OnboardingView: View {
 
                         HStack {
                             Text("npm install -g @anthropic-ai/claude-code")
-                                .font(.system(.body, design: .monospaced))
+                                .font(.custom("JetBrains Mono NL", size: ClaudeTheme.messageSize(11)))
                                 .foregroundStyle(ClaudeTheme.textPrimary)
                                 .textSelection(.enabled)
                                 .padding(8)

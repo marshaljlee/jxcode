@@ -190,7 +190,7 @@ public enum SlashCommandRegistry {
         Set(defaultCommands.map { commandKey($0.name) })
     }
 
-    static func normalizedNameForInput(_ name: String) -> String {
+    public static func normalizedNameForInput(_ name: String) -> String {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         return String(trimmed.drop { $0 == "/" })
     }
@@ -199,7 +199,7 @@ public enum SlashCommandRegistry {
         normalizedNameForInput(name).lowercased()
     }
 
-    static func namesMatch(_ lhs: String, _ rhs: String) -> Bool {
+    public static func namesMatch(_ lhs: String, _ rhs: String) -> Bool {
         commandKey(lhs) == commandKey(rhs)
     }
 
@@ -258,7 +258,7 @@ public enum SlashCommandRegistry {
         return normalizedStore(decoded)
     }
 
-    static func saveStore() {
+    public static func saveStore() {
         do {
             store = normalizedStore(store)
             let url = storeURL
@@ -273,7 +273,7 @@ public enum SlashCommandRegistry {
         }
     }
 
-    static func addCustomCommand(_ cmd: SlashCommand) {
+    public static func addCustomCommand(_ cmd: SlashCommand) {
         let custom = sanitizedCustomCommands(from: [cmd])
         guard let cmd = custom.first else { return }
         store.customCommands.removeAll { namesMatch($0.name, cmd.name) }
@@ -282,7 +282,7 @@ public enum SlashCommandRegistry {
         saveStore()
     }
 
-    static func replaceCustomCommand(name: String, with cmd: SlashCommand) {
+    public static func replaceCustomCommand(name: String, with cmd: SlashCommand) {
         let custom = sanitizedCustomCommands(from: [cmd])
         guard let cmd = custom.first else { return }
         store.customCommands.removeAll { namesMatch($0.name, name) || namesMatch($0.name, cmd.name) }
@@ -291,14 +291,14 @@ public enum SlashCommandRegistry {
         saveStore()
     }
 
-    static func removeCustomCommand(name: String) {
+    public static func removeCustomCommand(name: String) {
         store.customCommands.removeAll { namesMatch($0.name, name) }
         store.disabledCommands.remove(commandKey(name))
         invalidateCache()
         saveStore()
     }
 
-    static func modifyDefault(originalName: String, modified: SlashCommand) {
+    public static func modifyDefault(originalName: String, modified: SlashCommand) {
         guard let original = originalDefault(name: originalName) else { return }
         var modified = modified
         modified.name = original.name
@@ -311,35 +311,35 @@ public enum SlashCommandRegistry {
         saveStore()
     }
 
-    static func hideDefault(name: String) {
+    public static func hideDefault(name: String) {
         // Default commands cannot be deleted or hidden. Use setEnabled for visibility in the picker.
     }
 
-    static func resetAllDefaults() {
+    public static func resetAllDefaults() {
         store.hiddenDefaults.removeAll()
         store.modifiedDefaults.removeAll()
         invalidateCache()
         saveStore()
     }
 
-    static func isDefault(name: String) -> Bool {
+    public static func  isDefault(name: String) -> Bool {
         defaultCommandKeys.contains(commandKey(name))
     }
 
-    static func isHidden(name: String) -> Bool {
+    public static func isHidden(name: String) -> Bool {
         false
     }
 
-    static func isModified(name: String) -> Bool {
+    public static func isModified(name: String) -> Bool {
         guard let original = originalDefault(name: name) else { return false }
         return store.modifiedDefaults[original.name] != nil
     }
 
-    static func isEnabled(name: String) -> Bool {
+    public static func isEnabled(name: String) -> Bool {
         !store.disabledCommands.contains(commandKey(name))
     }
 
-    static func setEnabled(name: String, _ enabled: Bool) {
+    public static func setEnabled(name: String, _ enabled: Bool) {
         let key = commandKey(name)
         if enabled {
             store.disabledCommands.remove(key)
@@ -350,11 +350,11 @@ public enum SlashCommandRegistry {
         saveStore()
     }
 
-    static func originalDefault(name: String) -> SlashCommand? {
+    public static func originalDefault(name: String) -> SlashCommand? {
         defaultCommands.first { namesMatch($0.name, name) }
     }
 
-    static func customCommandExists(name: String, excluding excludedName: String? = nil) -> Bool {
+    public static func customCommandExists(name: String, excluding excludedName: String? = nil) -> Bool {
         store.customCommands.contains { command in
             guard namesMatch(command.name, name) else { return false }
             if let excludedName, namesMatch(command.name, excludedName) { return false }
@@ -362,13 +362,13 @@ public enum SlashCommandRegistry {
         }
     }
 
-    static var customCommandCount: Int {
+    public static var customCommandCount: Int {
         sanitizedCustomCommands(from: store.customCommands).count
     }
 
     // MARK: - Export / Import
 
-    static func exportCommands() -> Data? {
+    public static func exportCommands() -> Data? {
         let customOnly = sanitizedCustomCommands(from: store.customCommands)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -378,7 +378,7 @@ public enum SlashCommandRegistry {
         return Data((exportCommentHeader() + json + "\n").utf8)
     }
 
-    static func importCommands(from data: Data) -> Bool {
+    public static func importCommands(from data: Data) -> Bool {
         let jsonData = data.removingJSONComments()
         guard let imported = try? JSONDecoder().decode([SlashCommand].self, from: jsonData) else {
             return false
@@ -425,11 +425,11 @@ public enum SlashCommandRegistry {
         }.joined(separator: "\n") + "\n"
     }
 
-    static var enabledCommands: [SlashCommand] {
+    public static var enabledCommands: [SlashCommand] {
         commands.filter { isEnabled(name: $0.name) }
     }
 
-    static func filtered(by query: String) -> [SlashCommand] {
+    public static func filtered(by query: String) -> [SlashCommand] {
         let q = query.lowercased().trimmingCharacters(in: .whitespaces)
         if q.isEmpty || q == "/" { return enabledCommands }
         let search = q.hasPrefix("/") ? String(q.dropFirst()) : q
@@ -606,7 +606,7 @@ struct SlashCommandPopup: View {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
                             Text(cmd.command)
-                                .font(.system(size: ClaudeTheme.size(13), weight: .semibold, design: .monospaced))
+                                .font(.custom("JetBrains Mono NL", size: ClaudeTheme.size(13)).weight(.semibold))
                                 .foregroundStyle(isSelected ? ClaudeTheme.accent : ClaudeTheme.textPrimary)
 
                             if cmd.acceptsInput {
@@ -670,7 +670,7 @@ struct CommandDetailSheet: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(command.command)
-                        .font(.system(size: ClaudeTheme.size(16), weight: .bold, design: .monospaced))
+                        .font(.custom("JetBrains Mono NL", size: ClaudeTheme.size(16)).weight(.bold))
                         .foregroundStyle(ClaudeTheme.textPrimary)
 
                     Text(LocalizedStringKey(command.description), bundle: .module)
@@ -808,7 +808,7 @@ struct UsagePopoverView: View {
                     .foregroundStyle(ClaudeTheme.textSecondary)
             }
             Text(value)
-                .font(.system(size: ClaudeTheme.size(12), weight: .medium, design: .monospaced))
+                .font(.custom("JetBrains Mono NL", size: ClaudeTheme.size(12)).weight(.medium))
                 .foregroundStyle(ClaudeTheme.textPrimary)
         }
     }
@@ -984,7 +984,7 @@ enum AtFileSearch {
 
     /// Pre-warms the file cache for a project in the background.
     /// Call when a project is selected so the cache is ready when the user types @.
-    static func prefetch(projectPath: String) {
+    public static func prefetch(projectPath: String) {
         guard fileListCache[projectPath] == nil, !prefetchingPaths.contains(projectPath) else { return }
         prefetchingPaths.insert(projectPath)
         Task {
@@ -997,11 +997,11 @@ enum AtFileSearch {
     }
 
     /// Invalidates the cached file list for a project (e.g. after file-tree changes).
-    static func invalidate(for projectPath: String) {
+    public static func invalidate(for projectPath: String) {
         fileListCache.removeValue(forKey: projectPath)
     }
 
-    static func search(query: String, projectPath: String, maxResults: Int = 20) -> [AtFileEntry] {
+    public static func search(query: String, projectPath: String, maxResults: Int = 20) -> [AtFileEntry] {
         // Use the cached file list; fall back to a synchronous scan only if the
         // prefetch hasn't finished yet (should be rare after the first project open).
         let allFiles: [AtFileEntry]

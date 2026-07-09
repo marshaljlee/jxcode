@@ -182,7 +182,7 @@ public struct ShortcutManagerView: View {
                     }
 
                     Text(shortcut.message)
-                        .font(.system(size: ClaudeTheme.size(12), design: shortcut.isTerminalCommand ? .monospaced : .default))
+                        .font(shortcut.isTerminalCommand ? .custom("JetBrains Mono NL", size: ClaudeTheme.size(12)) : .system(size: ClaudeTheme.size(12)))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
@@ -338,7 +338,7 @@ struct ShortcutEditView: View {
                     // Message
                     fieldSection(isTerminalCommand ? LocalizedStringKey("Command") : LocalizedStringKey("Message")) {
                         TextEditor(text: $message)
-                            .font(.system(size: ClaudeTheme.size(13), design: isTerminalCommand ? .monospaced : .default))
+                            .font(isTerminalCommand ? .custom("JetBrains Mono NL", size: ClaudeTheme.size(13)) : .system(size: ClaudeTheme.size(13)))
                             .scrollContentBackground(.hidden)
                             .frame(minHeight: 80, maxHeight: 150)
                             .padding(8)

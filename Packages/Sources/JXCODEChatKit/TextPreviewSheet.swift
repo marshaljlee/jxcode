@@ -48,7 +48,7 @@ struct TextPreviewSheet: View {
             ScrollView {
                 if let text = attachment.textContent {
                     Text(text)
-                        .font(.system(size: ClaudeTheme.size(13), design: .monospaced))
+                        .font(.custom("JetBrains Mono NL", size: ClaudeTheme.size(13)))
                         .foregroundStyle(ClaudeTheme.textPrimary)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)

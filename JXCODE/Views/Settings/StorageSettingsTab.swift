@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import JXCODECore
 import JXCODEChatKit
 
@@ -169,7 +170,7 @@ public struct StorageSettingsTab: View {
         }
     }
 
-    private var clearCacheButton: some View {
+    @ViewBuilder private var clearCacheButton: some View {
         Button(action: { showClearCacheConfirmation = true }) {
             HStack(spacing: 10) {
                 Image(systemName: "trash")

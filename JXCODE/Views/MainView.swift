@@ -91,14 +91,28 @@ struct MainView: View {
                 .onAppear {
                     windowState.focusMode = appState.focusMode
                 }
-                .navigationTitle({
-                    let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
-                    let base = "JXCODE(\(appVersion))"
-                    if let cliVersion = appState.claudeVersion {
-                        return "\(base) — CC \(cliVersion)"
+                .toolbarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .principal) {
+                        HStack(spacing: 6) {
+                            Text("JXCODE")
+                                .font(.custom("JetBrains Mono NL", size: 13).weight(.semibold))
+                                .foregroundStyle(ClaudeTheme.textPrimary)
+                            Text(verbatim: {
+                                let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
+                                return "v\(v)"
+                            }())
+                            .font(.custom("JetBrains Mono NL", size: 10))
+                            .foregroundStyle(ClaudeTheme.textTertiary)
+                            if let cliVersion = appState.claudeVersion {
+                                Text("CC \(cliVersion)")
+                                    .font(.custom("JetBrains Mono NL", size: 9))
+                                    .foregroundStyle(ClaudeTheme.textTertiary.opacity(0.6))
+                                    .padding(.leading, 4)
+                            }
+                        }
                     }
-                    return base
-                }())
+                }
                 .toolbar {
                     if columnVisibility != .detailOnly {
                         ToolbarItemGroup(placement: .confirmationAction) {
@@ -710,44 +724,25 @@ struct ClaudeSegmentedControl: View {
 struct ProxyIndicatorDot: View {
     @State private var pm = ProxyManager.shared
     @Environment(\.openSettings) private var openSettings
-    
+
     var body: some View {
         Button {
             openSettings()
         } label: {
-            HStack(spacing: 4) {
-                Circle()
-                    .fill(statusColor)
-                    .frame(width: 6, height: 6)
-                Text(statusText)
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(ClaudeTheme.textTertiary)
-            }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
-            .background(ClaudeTheme.surfaceSecondary, in: Capsule())
-            .overlay(
-                Capsule()
-                    .strokeBorder(ClaudeTheme.border, lineWidth: 1)
-            )
+            Circle()
+                .fill(statusColor)
+                .frame(width: 8, height: 8)
+                .shadow(color: statusColor.opacity(0.5), radius: 3)
         }
         .buttonStyle(.plain)
-        .help("Proxy Server Status: \(statusText)")
+        .help("Proxy: \(pm.effectiveProxyActive ? "Connected (\(Int(pm.latency))ms)" : "Disconnected")")
     }
-    
+
     private var statusColor: Color {
-        if pm.isRunnerActive {
+        if pm.effectiveProxyActive {
             return pm.latency > 0 ? Color.green : Color.orange
         } else {
-            return Color.gray.opacity(0.5)
-        }
-    }
-    
-    private var statusText: String {
-        if pm.isRunnerActive {
-            return pm.latency > 0 ? "PRX \(Int(pm.latency))ms" : "PRX ERR"
-        } else {
-            return "PRX OFF"
+            return Color.gray.opacity(0.35)
         }
     }
 }

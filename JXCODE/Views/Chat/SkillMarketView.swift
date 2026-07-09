@@ -426,7 +426,7 @@ struct PluginDetailView: View {
                             .font(.system(size: ClaudeTheme.size(12), weight: .semibold))
 
                         Text(plugin.installCommand)
-                            .font(.system(size: ClaudeTheme.size(12), design: .monospaced))
+                            .font(.custom("JetBrains Mono NL", size: ClaudeTheme.size(12)))
                             .foregroundStyle(.secondary)
                             .padding(10)
                             .frame(maxWidth: .infinity, alignment: .leading)

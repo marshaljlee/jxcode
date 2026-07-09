@@ -126,7 +126,7 @@ public struct PaseoDiagnosticsTab: View {
                     var out = ""
                     process.standardOutput = Pipe()
                     (process.standardOutput as? Pipe)?.fileHandleForReading.readabilityHandler = { fh in
-                        out += String(decoding: fh.availableData, encoding: .utf8) ?? ""
+                        out += String(data: fh.availableData, encoding: .utf8) ?? ""
                     }
                     process.terminationHandler = { _ in
                         c.resume(returning: out.trimmingCharacters(in: .whitespacesAndNewlines))

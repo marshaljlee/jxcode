@@ -98,7 +98,7 @@ struct MessageBubble: View {
                                 .foregroundStyle(ClaudeTheme.statusSuccess)
                         }
                         Text(duration.formattedDuration)
-                            .font(.system(size: ClaudeTheme.messageSize(11), design: .monospaced))
+                            .font(.custom("JetBrains Mono NL", size: ClaudeTheme.messageSize(11)))
                             .foregroundStyle(ClaudeTheme.textTertiary)
                     }
                 }

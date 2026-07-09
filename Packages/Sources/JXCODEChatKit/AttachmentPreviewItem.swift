@@ -141,7 +141,7 @@ struct AttachmentPreviewItem: View {
         VStack(alignment: .leading, spacing: 0) {
             if let text = attachment.textContent {
                 Text(text.prefix(300))
-                    .font(.system(size: ClaudeTheme.size(7), design: .monospaced))
+                    .font(.custom("JetBrains Mono NL", size: ClaudeTheme.size(7)))
                     .foregroundStyle(ClaudeTheme.textTertiary)
                     .lineLimit(nil)
                     .padding(6)

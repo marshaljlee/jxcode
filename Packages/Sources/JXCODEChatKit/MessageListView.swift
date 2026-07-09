@@ -492,7 +492,7 @@ struct ElapsedTimeView: View {
 
     var body: some View {
         Text(elapsed.formattedDuration)
-            .font(.system(size: ClaudeTheme.size(12), design: .monospaced))
+            .font(.custom("JetBrains Mono NL", size: ClaudeTheme.size(12)))
             .foregroundStyle(ClaudeTheme.textTertiary)
             .onAppear {
                 elapsed = Date().timeIntervalSince(startDate)

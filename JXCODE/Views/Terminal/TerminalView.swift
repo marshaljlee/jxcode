@@ -177,7 +177,7 @@ struct InteractiveTerminalPopup: View {
                 Image(systemName: "terminal")
                     .foregroundStyle(ClaudeTheme.accent)
                 Text(state.title)
-                    .font(.system(size: ClaudeTheme.size(13), weight: .medium, design: .monospaced))
+                    .font(.custom("JetBrains Mono NL", size: ClaudeTheme.size(13)).weight(.medium))
                     .foregroundStyle(ClaudeTheme.textPrimary)
 
                 Spacer()
@@ -188,7 +188,7 @@ struct InteractiveTerminalPopup: View {
                             .font(.system(size: ClaudeTheme.size(11)))
                             .foregroundStyle(exitCode == 0 ? ClaudeTheme.statusSuccess : ClaudeTheme.statusError)
                         Text(exitCode == 0 ? "exit 0" : "exit \(exitCode)")
-                            .font(.system(size: ClaudeTheme.size(12), design: .monospaced))
+                            .font(.custom("JetBrains Mono NL", size: ClaudeTheme.size(12)))
                             .foregroundStyle(ClaudeTheme.textTertiary)
                     }
                 }

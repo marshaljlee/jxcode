@@ -261,7 +261,7 @@ private struct FileNodeRow: View {
                         .frame(width: 16)
 
                     Text(node.name)
-                        .font(.system(size: ClaudeTheme.size(13), design: node.isDirectory ? .default : .monospaced))
+                        .font(node.isDirectory ? .system(size: ClaudeTheme.size(13)) : .custom("JetBrains Mono NL", size: ClaudeTheme.size(13)))
                         .foregroundStyle(node.isDirectory ? ClaudeTheme.textPrimary : ClaudeTheme.textSecondary)
                         .lineLimit(1)
 
@@ -334,7 +334,7 @@ private struct SearchResultRow: View {
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text(node.name)
-                        .font(.system(size: ClaudeTheme.size(13), design: .monospaced))
+                        .font(.custom("JetBrains Mono NL", size: ClaudeTheme.size(13)))
                         .foregroundStyle(ClaudeTheme.textPrimary)
                         .lineLimit(1)
 

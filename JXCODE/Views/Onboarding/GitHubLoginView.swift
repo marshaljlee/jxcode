@@ -77,7 +77,7 @@ struct GitHubLoginView: View {
                     .foregroundStyle(ClaudeTheme.textSecondary)
 
                 Text(code)
-                    .font(.system(.title, design: .monospaced))
+                    .font(.custom("JetBrains Mono NL", size: ClaudeTheme.size(20)))
                     .fontWeight(.bold)
                     .foregroundStyle(ClaudeTheme.accent)
                     .textSelection(.enabled)

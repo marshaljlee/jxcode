@@ -161,6 +161,7 @@ actor ClaudeService {
 			env["HTTPS_PROXY"] = "http://127.0.0.1:\(proxyPort)"
 			env["ANTHROPIC_BASE_URL"] = "http://127.0.0.1:\(proxyPort)/v1"
 			env["ANTHROPIC_AUTH_TOKEN"] = "jxproxy"
+			env["ANTHROPIC_API_KEY"] = "jxproxy"
 		} else if await pm.isProxyEnabled {
 			let httpProxy = await pm.httpProxy
 			let httpsProxy = await pm.httpsProxy
@@ -173,6 +174,7 @@ actor ClaudeService {
 			if !allProxy.isEmpty { env["ALL_PROXY"] = allProxy }
 			env["ANTHROPIC_BASE_URL"] = "http://127.0.0.1:\(proxyPort)/v1"
 			env["ANTHROPIC_AUTH_TOKEN"] = "jxproxy"
+			env["ANTHROPIC_API_KEY"] = "jxproxy"
 		}
 		
 		return env
@@ -180,7 +182,12 @@ actor ClaudeService {
 
     // MARK: - Binary Discovery
 
-    /// Well-known paths searched in order before falling back to the shell.
+    /// Returns the path to the embedded claude binary inside the app bundle.
+    private static var embeddedBundlePath: String? {
+        Bundle.main.path(forResource: "claude", ofType: nil)
+    }
+
+    /// Well-known paths searched in order (after bundle check) before falling back to the shell.
     private static var candidatePaths: [String] {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         return [
@@ -192,11 +199,19 @@ actor ClaudeService {
     }
 
     /// Locate the `claude` binary on this machine.
+    /// Priority: embedded bundle → system paths → shell whence.
     func findClaudeBinary() async -> String? {
         let fm = FileManager.default
 
+        // 1. Check embedded bundle first
+        if let bundled = Self.embeddedBundlePath,
+           fm.isExecutableFile(atPath: bundled) {
+            logger.info("Using embedded claude binary at \(bundled, privacy: .public)")
+            return bundled
+        }
+
+        // 2. System candidates
         for path in Self.candidatePaths {
-            // Resolve symlinks before checking
             let resolved = (path as NSString).resolvingSymlinksInPath
             if fm.fileExists(atPath: resolved) && fm.isExecutableFile(atPath: path) {
                 logger.info("Found claude binary at \(path, privacy: .public) -> \(resolved, privacy: .public)")
@@ -204,7 +219,7 @@ actor ClaudeService {
             }
         }
 
-        // Shell fallback
+        // 3. Shell fallback
         logger.info("Trying shell fallback to locate claude binary")
         do {
             let result = try await runShellCommand("/bin/zsh", arguments: ["-ilc", "whence -p claude"])

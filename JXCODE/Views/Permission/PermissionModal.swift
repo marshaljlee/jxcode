@@ -88,7 +88,7 @@ struct PermissionModal: View {
 
             ScrollView {
                 Text(value)
-                    .font(.system(.body, design: .monospaced))
+                    .font(.custom("JetBrains Mono NL", size: ClaudeTheme.messageSize(11)))
                     .foregroundStyle(ClaudeTheme.textPrimary)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)

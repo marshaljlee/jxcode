@@ -116,102 +116,64 @@ final class AppState {
 
     // MARK: - Font Size
 
-    var fontSizeAdjustment: Int = (UserDefaults.standard.object(forKey: "fontSizeAdjustment") as? Int) ?? 0 {
+    var interfaceFontSize: CGFloat = {
+        let saved = UserDefaults.standard.object(forKey: "jxcode.interfaceFontSize") as? CGFloat
+        return saved ?? 12
+    }() {
         didSet {
-            UserDefaults.standard.set(fontSizeAdjustment, forKey: "fontSizeAdjustment")
-            ThemeStore.shared.fontSizeAdjustment = fontSizeAdjustment
+            UserDefaults.standard.set(interfaceFontSize, forKey: "jxcode.interfaceFontSize")
+            ThemeStore.shared.interfaceFontSize = interfaceFontSize
             themeRevision += 1
         }
     }
 
-    func increaseFontSize() {
-        guard fontSizeAdjustment < ThemeStore.maxFontSizeAdjustment else { return }
-        fontSizeAdjustment += 1
+    func increaseInterfaceFontSize() {
+        let newVal = min(ThemeStore.maxFontSize, interfaceFontSize + 1)
+        if newVal != interfaceFontSize { interfaceFontSize = newVal }
     }
 
-    func decreaseFontSize() {
-        guard fontSizeAdjustment > ThemeStore.minFontSizeAdjustment else { return }
-        fontSizeAdjustment -= 1
+    func decreaseInterfaceFontSize() {
+        let newVal = max(ThemeStore.minFontSize, interfaceFontSize - 1)
+        if newVal != interfaceFontSize { interfaceFontSize = newVal }
     }
 
-    var messageFontSizeAdjustment: Int = (UserDefaults.standard.object(forKey: "messageFontSizeAdjustment") as? Int) ?? 0 {
+    var messageFontSize: CGFloat = {
+        let saved = UserDefaults.standard.object(forKey: "jxcode.messageFontSize") as? CGFloat
+        return saved ?? 12
+    }() {
         didSet {
-            UserDefaults.standard.set(messageFontSizeAdjustment, forKey: "messageFontSizeAdjustment")
-            ThemeStore.shared.messageFontSizeAdjustment = messageFontSizeAdjustment
+            UserDefaults.standard.set(messageFontSize, forKey: "jxcode.messageFontSize")
+            ThemeStore.shared.messageFontSize = messageFontSize
             themeRevision += 1
         }
     }
 
     func increaseMessageFontSize() {
-        guard messageFontSizeAdjustment < ThemeStore.maxFontSizeAdjustment else { return }
-        messageFontSizeAdjustment += 1
+        let newVal = min(ThemeStore.maxFontSize, messageFontSize + 1)
+        if newVal != messageFontSize { messageFontSize = newVal }
     }
 
     func decreaseMessageFontSize() {
-        guard messageFontSizeAdjustment > ThemeStore.minFontSizeAdjustment else { return }
-        messageFontSizeAdjustment -= 1
+        let newVal = max(ThemeStore.minFontSize, messageFontSize - 1)
+        if newVal != messageFontSize { messageFontSize = newVal }
     }
 
     // MARK: - Model
 
-    static let availableModels = [
-        "default", "best",
-        "claude-fable-5",
-        "opus", "claude-opus-4-8[1m]", "claude-opus-4-8", "claude-opus-4-7[1m]", "claude-opus-4-7", "claude-opus-4-6[1m]", "claude-opus-4-6", "opus[1m]", "opusplan",
-        "sonnet", "claude-sonnet-5", "claude-sonnet-4-6[1m]", "claude-sonnet-4-6", "sonnet[1m]",
-        "haiku", "claude-haiku-4-5"
-    ]
+    static var availableModels: [String] {
+        ["default", "best"] + ClaudeModelService.allModelIds
+    }
 
     static func modelDisplayName(_ model: String) -> String {
-        switch model {
-        case "default": return "Default"
-        case "best": return "Best"
-        case "claude-fable-5": return "Fable 5"
-        case "opus": return "Opus"
-        case "claude-opus-4-8[1m]": return "Opus 4.8 1M"
-        case "claude-opus-4-8": return "Opus 4.8"
-        case "claude-opus-4-7[1m]": return "Opus 4.7 1M"
-        case "claude-opus-4-7": return "Opus 4.7"
-        case "claude-opus-4-6[1m]": return "Opus 4.6 1M"
-        case "claude-opus-4-6": return "Opus 4.6"
-        case "opus[1m]": return "Opus 1M"
-        case "opusplan": return "Opus Plan"
-        case "sonnet": return "Sonnet"
-        case "claude-sonnet-5": return "Sonnet 5"
-        case "claude-sonnet-4-6[1m]": return "Sonnet 4.6 1M"
-        case "claude-sonnet-4-6": return "Sonnet 4.6"
-        case "sonnet[1m]": return "Sonnet 1M"
-        case "haiku": return "Haiku"
-        case "claude-haiku-4-5": return "Haiku 4.5"
-        default: return model.capitalized
-        }
+        if model == "default" { return "Default" }
+        if model == "best" { return "Best" }
+        return ClaudeModelService.displayName(for: model) ?? ClaudeModelService.displayName(for: ClaudeModelService.resolveAlias(model)) ?? model.capitalized
     }
 
     static func modelDescription(_ model: String) -> String {
-        let key: String
-        switch model {
-        case "default":   key = "model.desc.default"
-        case "best":      key = "model.desc.best"
-        case "claude-fable-5": return "Fable 5 — Most powerful model"
-        case "opus":      key = "model.desc.opus"
-        case "claude-opus-4-8[1m]": return "Opus 4.8 with 1M context window"
-        case "claude-opus-4-8": return "Opus 4.8 — Latest Opus release"
-        case "claude-opus-4-7[1m]": return "Opus 4.7 with 1M context window"
-        case "claude-opus-4-7": return "Opus 4.7 — Previous Opus release"
-        case "claude-opus-4-6[1m]": return "Opus 4.6 with 1M context window"
-        case "claude-opus-4-6": return "Opus 4.6 — Most capable for complex work"
-        case "opus[1m]":  key = "model.desc.opus1m"
-        case "opusplan":  key = "model.desc.opusplan"
-        case "sonnet":    key = "model.desc.sonnet"
-        case "claude-sonnet-5": return "Sonnet 5 — Best for everyday tasks"
-        case "claude-sonnet-4-6[1m]": return "Sonnet 4.6 with 1M context window"
-        case "claude-sonnet-4-6": return "Sonnet 4.6 — Best for everyday tasks"
-        case "sonnet[1m]": key = "model.desc.sonnet1m"
-        case "haiku":     key = "model.desc.haiku"
-        case "claude-haiku-4-5": return "Haiku 4.5 — Fastest for quick answers"
-        default: return ""
-        }
-        return NSLocalizedString(key, comment: "")
+        if model == "default" { return "Default — Uses the model configured for this project server" }
+        if model == "best" { return "Best — Uses the most capable model available" }
+        return ClaudeModelService.description(for: model) ?? ClaudeModelService.description(for: ClaudeModelService.resolveAlias(model)) ?? ""
     }
     static let availableEfforts = ["low", "medium", "high", "xhigh", "max"]
 
@@ -241,7 +203,7 @@ final class AppState {
         return NSLocalizedString(key, comment: "")
     }
 
-    var selectedModel: String = UserDefaults.standard.string(forKey: "selectedModel") ?? "opus" {
+    var selectedModel: String = ClaudeModelService.resolveAlias(UserDefaults.standard.string(forKey: "selectedModel") ?? "opus") {
         didSet { UserDefaults.standard.set(selectedModel, forKey: "selectedModel") }
     }
 
@@ -336,10 +298,11 @@ final class AppState {
 
     /// Sets the model for the current session and persists it in the session state.
     func setSessionModel(_ model: String, in window: WindowState) {
-        window.sessionModel = model
+        let resolved = ClaudeModelService.resolveAlias(model)
+        window.sessionModel = resolved
         let key = window.currentSessionId ?? window.newSessionKey
         updateState(key) { state in
-            state.model = model
+            state.model = resolved
             // Drop the cached CLI-reported name so the status line reflects the
             // user's choice immediately; the next system event will refill it.
             state.activeModelName = nil
@@ -547,8 +510,8 @@ final class AppState {
     /// Once per app launch — start services and load shared data
     func initialize() async {
         ThemeStore.shared.current = selectedTheme
-        ThemeStore.shared.fontSizeAdjustment = fontSizeAdjustment
-        ThemeStore.shared.messageFontSizeAdjustment = messageFontSizeAdjustment
+        ThemeStore.shared.interfaceFontSize = interfaceFontSize
+        ThemeStore.shared.messageFontSize = messageFontSize
 
         let binary = await claude.findClaudeBinary()
         claudeInstalled = binary != nil
@@ -572,6 +535,8 @@ final class AppState {
         agents = await persistence.loadAgents()
         agentRuns = await persistence.loadAgentRuns()
         usageRecords = await persistence.loadUsageRecords()
+
+        await ClaudeModelService.loadSettingsModels()
 
         if let cachedUser = await persistence.loadGitHubUser() {
             gitHubUser = cachedUser
@@ -600,6 +565,11 @@ final class AppState {
             try await permission.start()
         } catch {
             logger.error("Failed to start permission server: \(error.localizedDescription)")
+        }
+
+        // Sync embedded Claude CLI with installed version (background)
+        Task.detached(priority: .background) {
+            await UpdateService.shared.syncEmbeddedClaude()
         }
 
         // Permission request routing is handled per-window in initializeWindow's listener.
@@ -849,7 +819,8 @@ final class AppState {
         case "model":
             if parts.count > 1 {
                 let arg = String(parts[1]).trimmingCharacters(in: .whitespaces).lowercased()
-                let matched = Self.availableModels.first { $0 == arg } ?? Self.availableModels.first { arg.contains($0) } ?? arg
+                let resolved = ClaudeModelService.resolveAlias(arg)
+                let matched = Self.availableModels.first { $0 == resolved || $0 == arg } ?? Self.availableModels.first { resolved.contains($0) || arg.contains($0) } ?? resolved
                 setSessionModel(matched, in: window)
             } else {
                 window.showModelPicker = true

@@ -527,7 +527,7 @@ private func parseInlineMarkdown(_ content: String) -> AttributedString {
     }
     // Inline code spans: monospace font + background color
     for range in codeRanges.reversed() {
-        result[range].font = .system(size: 14, design: .monospaced)
+        result[range].font = .jetBrainsMono(size: 14)
         result[range].foregroundColor = ClaudeTheme.textPrimary
         result[range].backgroundColor = ClaudeTheme.surfaceTertiary
         result[range].baselineOffset = 0.5
@@ -677,7 +677,7 @@ struct CodeBlockView: View {
             HStack {
                 if !language.isEmpty {
                     Text(language)
-                        .font(.system(size: ClaudeTheme.messageSize(11), weight: .medium, design: .monospaced))
+                        .font(.custom("JetBrains Mono NL", size: ClaudeTheme.messageSize(11)).weight(.medium))
                         .foregroundStyle(ClaudeTheme.textTertiary)
                 }
 

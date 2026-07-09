@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import JXCODECore
 
 // MARK: - Paseo Projects Tab
@@ -623,7 +624,7 @@ public struct PaseoProjectsTab: View {
             activate
             tell application "System Events" to tell process "Terminal" to keystroke "t" using command down
             delay 0.2
-            do script "cd \(url.path.shellQuoted())" in front window
+            do script "cd \(url.path.shellQuotedForAppleScript)" in front window
         end tell
         """
         var error: NSDictionary?
@@ -655,5 +656,12 @@ public struct PaseoProjectsTab: View {
         guard process.terminationStatus == 0 else { return nil }
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+private extension String {
+    var shellQuotedForAppleScript: String {
+        self.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
     }
 }

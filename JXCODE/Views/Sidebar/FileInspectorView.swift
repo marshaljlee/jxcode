@@ -81,7 +81,7 @@ struct FileInspectorView: View {
                 .foregroundStyle(iconColorForExtension)
 
             Text(fileName)
-                .font(.system(size: ClaudeTheme.size(13), weight: .semibold, design: .monospaced))
+                .font(.custom("JetBrains Mono NL", size: ClaudeTheme.size(13)).weight(.semibold))
                 .foregroundStyle(ClaudeTheme.textPrimary)
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -167,7 +167,7 @@ struct FileInspectorView: View {
                 ClaudeThemeDivider()
             }
             TextEditor(text: $editingContent)
-                .font(.system(size: ClaudeTheme.size(12), design: .monospaced))
+                .font(.custom("JetBrains Mono NL", size: ClaudeTheme.size(12)))
                 .scrollContentBackground(.hidden)
                 .background(ClaudeTheme.codeBackground)
                 .padding(.leading, 10)

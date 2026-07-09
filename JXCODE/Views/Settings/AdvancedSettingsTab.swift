@@ -44,6 +44,10 @@ public struct AdvancedSettingsTab: View {
                 .font(.system(size: ClaudeTheme.size(11)))
                 .foregroundStyle(.secondary)
 
+            Text("To use the jxproxy-built binary, point this to: ~/Library/Mobile\\ Documents/com~apple~CloudDocs/Git/jxproxy/dist/jxproxy")
+                .font(.system(size: ClaudeTheme.size(10)))
+                .foregroundStyle(ClaudeTheme.statusWarning)
+
             HStack(spacing: 8) {
                 TextField("/usr/local/bin/claude", text: $claudeBinaryPath)
                     .textFieldStyle(.plain)

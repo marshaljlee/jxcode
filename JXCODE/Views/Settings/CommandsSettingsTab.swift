@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import JXCODECore
 import JXCODEChatKit
 
@@ -14,7 +15,7 @@ private struct BuiltInCommandDetailSheet: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(command.command)
-                        .font(.system(size: ClaudeTheme.size(16), weight: .bold, design: .monospaced))
+                        .font(.custom("JetBrains Mono NL", size: ClaudeTheme.size(16)).weight(.bold))
                         .foregroundStyle(ClaudeTheme.textPrimary)
                     Text(command.description)
                         .font(.system(size: ClaudeTheme.size(13)))
@@ -45,7 +46,7 @@ private struct BuiltInCommandDetailSheet: View {
                             HStack(spacing: 6) {
                                 ForEach(command.aliases, id: \.self) { alias in
                                     Text("/\(alias)")
-                                        .font(.system(size: ClaudeTheme.size(12), design: .monospaced))
+                                        .font(.custom("JetBrains Mono NL", size: ClaudeTheme.size(12)))
                                         .foregroundStyle(Color.accentColor)
                                         .padding(.horizontal, 8)
                                         .padding(.vertical, 3)
@@ -310,13 +311,14 @@ public struct CommandsSettingsTab: View {
 
     // MARK: - Command Row
 
+    @ViewBuilder
     private func commandRow(_ cmd: SlashCommand) -> some View {
         let isEnabled = SlashCommandRegistry.isEnabled(name: cmd.name)
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(cmd.command)
-                        .font(.system(size: ClaudeTheme.size(12), weight: .semibold, design: .monospaced))
+                        .font(.custom("JetBrains Mono NL", size: ClaudeTheme.size(12)).weight(.semibold))
                         .foregroundStyle(isEnabled ? Color.primary : Color.secondary)
 
                     if cmd.acceptsInput {
@@ -349,13 +351,14 @@ public struct CommandsSettingsTab: View {
         .opacity(isEnabled ? 1.0 : 0.5)
     }
 
+    @ViewBuilder
     private func customCommandRow(_ cmd: SlashCommand) -> some View {
         let isEnabled = SlashCommandRegistry.isEnabled(name: cmd.name)
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(cmd.command)
-                        .font(.system(size: ClaudeTheme.size(12), weight: .semibold, design: .monospaced))
+                        .font(.custom("JetBrains Mono NL", size: ClaudeTheme.size(12)).weight(.semibold))
                         .foregroundStyle(isEnabled ? Color.primary : Color.secondary)
                 }
                 Text(cmd.description)
@@ -567,11 +570,11 @@ public struct CommandEditSheet: View {
                     fieldSection("Name") {
                         HStack(spacing: 4) {
                             Text("/")
-                                .font(.system(size: ClaudeTheme.size(14), weight: .medium, design: .monospaced))
+                                .font(.custom("JetBrains Mono NL", size: ClaudeTheme.size(14)).weight(.medium))
                                 .foregroundStyle(.secondary)
                             TextField("Command name (e.g. deploy)", text: $name)
                                 .textFieldStyle(.plain)
-                                .font(.system(size: ClaudeTheme.size(14), design: .monospaced))
+                                .font(.custom("JetBrains Mono NL", size: ClaudeTheme.size(14)))
                                 .disabled(isDefault)
                         }
                         .padding(.horizontal, 12)

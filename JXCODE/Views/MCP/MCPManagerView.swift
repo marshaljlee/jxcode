@@ -91,7 +91,7 @@ struct MCPManagerView: View {
                             .font(.system(size: ClaudeTheme.size(11), weight: .semibold))
                             .foregroundStyle(ClaudeTheme.textSecondary)
                         TextEditor(text: $argsString)
-                            .font(.system(.body, design: .monospaced))
+                            .font(.custom("JetBrains Mono NL", size: ClaudeTheme.messageSize(11)))
                             .frame(height: 80)
                             .border(ClaudeTheme.surfaceSecondary, width: 1)
                     }
@@ -101,7 +101,7 @@ struct MCPManagerView: View {
                             .font(.system(size: ClaudeTheme.size(11), weight: .semibold))
                             .foregroundStyle(ClaudeTheme.textSecondary)
                         TextEditor(text: $envString)
-                            .font(.system(.body, design: .monospaced))
+                            .font(.custom("JetBrains Mono NL", size: ClaudeTheme.messageSize(11)))
                             .frame(height: 80)
                             .border(ClaudeTheme.surfaceSecondary, width: 1)
                     }
@@ -155,7 +155,7 @@ struct MCPManagerView: View {
 
                             ScrollView {
                                 Text(testLog)
-                                    .font(.system(.body, design: .monospaced))
+                                    .font(.custom("JetBrains Mono NL", size: ClaudeTheme.messageSize(11)))
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .padding(8)
                             }

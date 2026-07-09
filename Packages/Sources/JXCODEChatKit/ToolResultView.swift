@@ -123,7 +123,7 @@ struct ToolResultView: View {
 
                     ScrollView {
                         Text(result)
-                            .font(.system(.caption, design: .monospaced))
+                            .font(.custom("JetBrains Mono NL", size: ClaudeTheme.size(9)))
                             .foregroundStyle(toolCall.isError ? ClaudeTheme.statusError : ClaudeTheme.textPrimary)
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -186,7 +186,7 @@ struct ToolResultView: View {
             ForEach(Array(visibleLines.enumerated()), id: \.offset) { _, item in
                 let (prefix, text, isAdded) = item
                 Text(prefix + " " + text)
-                    .font(.system(size: ClaudeTheme.messageSize(12), design: .monospaced))
+                    .font(.custom("JetBrains Mono NL", size: ClaudeTheme.messageSize(12)))
                     .foregroundStyle(isAdded ? ClaudeTheme.statusSuccess : ClaudeTheme.statusError)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 8)

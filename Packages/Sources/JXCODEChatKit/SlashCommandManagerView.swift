@@ -252,7 +252,7 @@ public struct SlashCommandManagerView: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(cmd.command)
-                        .font(.system(size: ClaudeTheme.size(13), weight: .semibold, design: .monospaced))
+                        .font(.custom("JetBrains Mono NL", size: ClaudeTheme.size(13)).weight(.semibold))
                         .foregroundStyle(isEnabled ? Color.primary : Color.secondary)
 
                     if isDefault {
@@ -463,11 +463,11 @@ struct SlashCommandEditView: View {
                     fieldSection("Name") {
                         HStack(spacing: 4) {
                             Text("/")
-                                .font(.system(size: ClaudeTheme.size(14), weight: .medium, design: .monospaced))
+                                .font(.custom("JetBrains Mono NL", size: ClaudeTheme.size(14)).weight(.medium))
                                 .foregroundStyle(.secondary)
                             TextField(String(localized: "Command name (e.g. my-command)", bundle: .module), text: $name)
                                 .textFieldStyle(.plain)
-                                .font(.system(size: ClaudeTheme.size(14), design: .monospaced))
+                                .font(.custom("JetBrains Mono NL", size: ClaudeTheme.size(14)))
                                 .disabled(isDefault)
                         }
                         .padding(.horizontal, 12)
