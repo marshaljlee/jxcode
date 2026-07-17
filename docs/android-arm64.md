@@ -34,10 +34,13 @@ On Android, the Flutter app cannot spawn the `jxclaude` CLI binary directly (no 
 
 ## One-Shot Installer
 
-Run this from Termux — it handles steps 2–7 automatically:
+The repo is private, so clone it first then run the installer inside Termux:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/marshaljlee/jxcode/main/installers/install-termux.sh | bash
+pkg install git -y
+git clone https://github.com/marshaljlee/jxcode.git
+cd jxcode
+bash installers/install-termux.sh
 ```
 
 After it finishes, add your API key to `~/.jxproxy/config.env` and start jxproxy:

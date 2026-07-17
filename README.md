@@ -101,10 +101,13 @@ curl -fsSL https://raw.githubusercontent.com/marshaljlee/jxproxy/main/install.sh
 
 ### Android (One-Shot Installer)
 
-Run this inside Termux (F-Droid):
+Clone the repo (private) and run the installer inside Termux (F-Droid):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/marshaljlee/jxcode/main/installers/install-termux.sh | bash
+pkg install git -y
+git clone https://github.com/marshaljlee/jxcode.git
+cd jxcode
+bash installers/install-termux.sh
 ```
 
 This installs bun, proot, jxproxy, sets up the `/tmp` fix, configures everything, and attempts to download the jxcode APK.

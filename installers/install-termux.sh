@@ -9,8 +9,13 @@
 #   4. jxcode APK download (from GitHub Releases)
 #   5. Configuration + start instructions
 #
-# Usage:
-#   curl -fsSL https://raw.githubusercontent.com/marshaljlee/jxcode/main/installers/install-termux.sh | bash
+# This script is part of the jxcode repo. Since the repo is private, you
+# must clone it first rather than piping from raw.githubusercontent.com:
+#
+#   pkg install git -y
+#   git clone https://github.com/marshaljlee/jxcode.git
+#   cd jxcode
+#   bash installers/install-termux.sh
 #
 # Flags:
 #   --apk-url=URL    Override APK download URL (default: GitHub latest release)
