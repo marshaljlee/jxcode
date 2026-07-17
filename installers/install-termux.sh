@@ -3,22 +3,21 @@
 # install-termux.sh — One-shot jxcode setup for Android ARM64 (Termux)
 #
 # Installs everything needed to run jxcode on an Android ARM64 device:
-#   1. Termux dependencies (bun, proot, git)
-#   2. jxproxy (proxy/router from github.com/marshaljlee/jxproxy)
-#   3. /tmp fix via proot bind mount
-#   4. jxcode APK download (from GitHub Releases)
+#   1. Termux dependencies (proot, git, wget)
+#   2. Bun runtime (official installer — not in Termux repos)
+#   3. jxproxy (proxy/router from github.com/marshaljlee/jxproxy)
+#   4. /tmp fix via proot bind mount
 #   5. Configuration + start instructions
 #
-# This script is part of the jxcode repo. Since the repo is private, you
-# must clone it first rather than piping from raw.githubusercontent.com:
+# Usage:
+#   First clone the repo (private — raw CDN won't serve it):
 #
-#   pkg install git -y
-#   git clone https://github.com/marshaljlee/jxcode.git
-#   cd jxcode
-#   bash installers/install-termux.sh
+#     pkg install git -y
+#     git clone https://github.com/marshaljlee/jxcode.git
+#     cd jxcode
+#     bash installers/install-termux.sh
 #
 # Flags:
-#   --apk-url=URL    Override APK download URL (default: GitHub latest release)
 #   --skip-apk       Skip APK download (already installed via adb)
 #   --port=PORT      jxproxy port (default: 5255)
 #   --provider=X     Default LLM provider: direct, openrouter, opencode-zen (default: direct)
@@ -99,10 +98,28 @@ echo ""
 echo -e "  ${BOLD}┃${NC} ${CYAN}Step 1/5${NC} — Installing system dependencies"
 
 pkg update -y 2>/dev/null | tail -1
-pkg install -y bun proot git wget 2>&1 | tail -1
+pkg install -y proot git wget 2>&1 | tail -1
+
+# Bun is not in Termux repos — install via the official script.
+if ! command -v bun &>/dev/null; then
+  echo -e "  ${BOLD}┃${NC}     Installing Bun runtime (official installer)..."
+  curl -fsSL https://bun.sh/install | bash
+  # Source bun immediately (reload doesn't work in Termux)
+  export BUN_INSTALL="${HOME}/.bun"
+  export PATH="${BUN_INSTALL}/bin:${PATH}"
+else
+  echo -e "  ${BOLD}┃${NC}     Bun already installed"
+fi
 
 BUN_VER=$(bun --version 2>/dev/null || echo "none")
 echo -e "  ${BOLD}┃${NC}   ${GREEN}✓${NC} bun ${BUN_VER}, proot, git, wget"
+
+# Persist bun in PATH for future shells
+BUN_LINE='export PATH="${HOME}/.bun/bin:${PATH}"'
+if ! grep -q "\.bun/bin" "$HOME/.bashrc" 2>/dev/null; then
+  echo "$BUN_LINE" >> "$HOME/.bashrc"
+  echo -e "  ${BOLD}┃${NC}   ${GREEN}✓${NC} bun path persisted in ~/.bashrc"
+fi
 echo ""
 
 # ─────────────────────────────────────────────────
