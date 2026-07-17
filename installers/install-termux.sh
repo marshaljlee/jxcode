@@ -102,27 +102,30 @@ echo ""
 echo -e "  ${BOLD}┃${NC} ${CYAN}Step 1/5${NC} — Installing system dependencies"
 
 pkg update -y 2>/dev/null | tail -1
-pkg install -y proot git wget 2>&1 | tail -1
+pkg install -y proot git wget nodejs-lts 2>&1 | tail -1
 
 # Bun is not in Termux repos — install via the official script.
 if ! command -v bun &>/dev/null; then
-  echo -e "  ${BOLD}┃${NC}     Installing Bun runtime (official installer)..."
-  curl -fsSL https://bun.sh/install | bash
-  # Source bun immediately (reload doesn't work in Termux)
-  export BUN_INSTALL="${HOME}/.bun"
-  export PATH="${BUN_INSTALL}/bin:${PATH}"
+  echo -e "  ${BOLD}┃${NC}     Installing Bun via npm (Termux-compatible)..."
+  npm install -g bun 2>&1 | tail -1
+  export PATH="${HOME}/.npm-global/bin:${PATH}"
+elif ! bun --version >/dev/null 2>&1; then
+  echo -e "  ${BOLD}┃${NC}     Bun binary broken (glibc mismatch). Reinstalling via npm..."
+  npm install -g bun 2>&1 | tail -1
+  export PATH="${HOME}/.npm-global/bin:${PATH}"
 else
   echo -e "  ${BOLD}┃${NC}     Bun already installed"
 fi
 
 BUN_VER=$(bun --version 2>/dev/null || echo "none")
-echo -e "  ${BOLD}┃${NC}   ${GREEN}✓${NC} bun ${BUN_VER}, proot, git, wget"
+NODE_VER=$(node --version 2>/dev/null || echo "none")
+echo -e "  ${BOLD}┃${NC}   ${GREEN}✓${NC} bun ${BUN_VER}, node ${NODE_VER}, proot, git, wget"
 
-# Persist bun in PATH for future shells
-BUN_LINE='export PATH="${HOME}/.bun/bin:${PATH}"'
-if ! grep -q "\.bun/bin" "$HOME/.bashrc" 2>/dev/null; then
-  echo "$BUN_LINE" >> "$HOME/.bashrc"
-  echo -e "  ${BOLD}┃${NC}   ${GREEN}✓${NC} bun path persisted in ~/.bashrc"
+# Persist npm-global bin in PATH
+NPM_LINE='export PATH="${HOME}/.npm-global/bin:${PATH}"'
+if ! grep -q "\.npm-global/bin" "$HOME/.bashrc" 2>/dev/null; then
+  echo "$NPM_LINE" >> "$HOME/.bashrc"
+  echo -e "  ${BOLD}┃${NC}   ${GREEN}✓${NC} npm-global/bin persisted in ~/.bashrc"
 fi
 echo ""
 
