@@ -593,7 +593,7 @@ verify() {
     "proot:proot" \
     "git:git" \
     "node:node" \
-    "bashrc:~/.bashrc"; do
+    "bashrc:${HOME}/.bashrc"; do
 
     local label="${check%%:*}"
     local cmd="${check##*:}"
