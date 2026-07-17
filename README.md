@@ -99,18 +99,19 @@ npm install -g @anthropic-ai/claude-code
 curl -fsSL https://raw.githubusercontent.com/marshaljlee/jxproxy/main/install.sh | bash
 ```
 
-### Android
+### Android (One-Shot Installer)
 
-See [docs/android-arm64.md](docs/android-arm64.md) for the full Termux + jxproxy setup.
+Run this inside Termux (F-Droid):
 
-Quick summary:
+```bash
+curl -fsSL https://raw.githubusercontent.com/marshaljlee/jxcode/main/installers/install-termux.sh | bash
+```
 
-1. Install Termux from F-Droid
-2. `pkg install bun proot -y`
-3. `curl -fsSL https://raw.githubusercontent.com/marshaljlee/jxproxy/main/install.sh | bash`
-4. `proot -b /data/data/com.termux/files/usr/tmp:/tmp`
-5. `jxproxy server --port 5255`
-6. Open jxcode app — auto-connects to `127.0.0.1:5255`
+This installs bun, proot, jxproxy, sets up the `/tmp` fix, configures everything, and attempts to download the jxcode APK.
+
+After it finishes, add your API key to `~/.jxproxy/config.env`, start jxproxy, and open the app.
+
+See [docs/android-arm64.md](docs/android-arm64.md) for manual setup and troubleshooting.
 
 ## Tech Stack
 
