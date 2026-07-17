@@ -1,33 +1,51 @@
-# Handoff — 2026-07-09
+# Handoff — 2026-07-18
 
 ## Goal
-Fix 6 issues in JXCODE: proxy routing auth, brainwave theme, proxy dot, font system, version display, settings organization.
+Fix Android ARM64 runtime support — Flutter app cannot spawn jxclaude CLI on Android, so it needs API mode (HTTP/SSE through jxproxy at port 5255).
 
 ## Current State
-All changes applied and build succeeds. The critical auth fix (ANTHROPIC_API_KEY) means the stock claude binary now sends the correct `x-api-key: jxproxy` header through the jxproxy.
+- **Flutter 3.44.6**, Dart 3.12.2
+- **`flutter analyze`**: No issues found ✅
+- **`flutter test`**: **23/23 pass** ✅ (11 existing + 12 new SSE parser tests)
+- **Android ARM64 APK**: builds successfully (was already working from prior handoff)
+- **All 5 implementation steps completed**
+
+### Architecture Changes
+
+| Component | Change |
+|-----------|--------|
+| `ClaudeService` (Flutter) | Dual-mode: process mode (macOS, spawn jxclaude) + API mode (Android, HTTP POST to jxproxy port 5255) |
+| `ProxyConfig` (Flutter) | Providers aligned with Swift model: direct, openrouter, opencodeZen, opencodeGo, google, nvidia, nemotron, local, custom; `displayName` getter added |
+| `ChatBloc` | Accepts `ProxyBloc` reference, syncs proxy host/port to `ClaudeService` before each send |
+| `app.dart` | `proxyBloc` created before `chatBloc`, passed as dependency |
+| jxproxy `install.sh` | Termux detection → routes to `installers/install-android.sh` |
+| jxproxy `README.md` | Android ARM64 + jxcode section added |
+| SSE parser (`SseParser`) | Public class with chunk-boundary handling, cancellation support, tested |
+
+### New Files Created
+- `docs/android-arm64.md` — full setup guide for Android ARM64
+- `test/claude_service_api_test.dart` — 12 tests covering SSE → StreamEvent mapping
+
+### Files Modified
+- `lib/services/claude_service.dart` — dual-mode architecture
+- `lib/models/proxy_config.dart` — aligned providers, displayName getter
+- `lib/blocs/chat/chat_bloc.dart` — proxy config wiring
+- `lib/app.dart` — proxyBloc ordering
+- `lib/pages/settings/settings_page.dart` — uses displayName
+- `test/settings_bloc_test.dart` — fixed model name: sonnet-4-6 → sonnet-5
+- jxproxy/install.sh — Termux detection
+- jxproxy/README.md — Android section
 
 ## Active Files
-- `JXCODE/Services/ClaudeService.swift` — ANTHROPIC_API_KEY added
-- `JXCODE/Views/MainView.swift` — ProxyIndicatorDot (no label, live detection), version display
-- `Packages/Sources/JXCODECore/Theme/AppTheme.swift` — brainwave colors, ThemeStore font system
-- `Packages/Sources/JXCODECore/Theme/ClaudeTheme.swift` — size() functions use absolute font
-- `JXCODE/App/AppState.swift` — absolute font size properties
-- `JXCODE/Views/SettingsView.swift` — cleaned up categories
-- `JXCODE/Views/Settings/PaseoAppearanceTab.swift` — notifications/panel layout, font sliders
-- `JXCODE/Views/Settings/AdvancedSettingsTab.swift` — jxproxy binary hint
-
-## Changes Made
-1. **Proxy routing** — Added `ANTHROPIC_API_KEY=jxproxy` to subprocess environment. Stock claude now sends correct auth to jxproxy.
-2. **Brainwave theme** — Changed from magenta-pink ("blackpink") to electric cyan (`#00D4FF`) on deep navy. Light counterpart changed to icy blue-white.
-3. **Proxy dot** — Removed "PRX ON/OFF" label. Now uses `effectiveProxyActive` (live `/health` polling via `isPortActive`). Pure dot with glow shadow.
-4. **Font system** — Changed from relative offset model to absolute font size (default 12pt). `ClaudeTheme.size()` now scales relative to the user's absolute pref. Settings UI shows "12pt" directly.
-5. **Version display** — Changed from `"JXCODE(1.3.9) — CC 2.1.201"` string to a custom toolbar with JXCODE in semibold, version in small tertiary, CC version in faded (`opacity(0.6)`) 9pt.
-6. **Settings categories** — Reduced from 6 to 4 functional categories: General (Appearance/Chat/Permissions), Network (Proxy/Environment), Developer (Advanced/Commands/Shortcuts/Hooks/CLAUDE.MD/Storage), Account (Usage/Diagnostics). Removed orphan "Projects" tab.
-
-## Failed Attempts
-None.
+- `lib/services/claude_service.dart` — SseParser class (public), SSE mapping, API mode
+- `lib/models/proxy_config.dart` — ProxyProvider enum with all providers
+- `docs/android-arm64.md` — setup guide
+- `test/claude_service_api_test.dart` — 12 SSE tests
+- jxproxy/install.sh — Termux support
 
 ## Next Steps
-1. Run the compiled JXCODE app to verify the proxy now routes correctly
-2. Check if the brainwave theme colors match Master's visual reference
-3. The jxproxy binary embedded in the app bundle (`jxproxyBinary`) could be bundled into the .app for one-click deployment
+1. **Build Android APK** and test on a physical ARM64 device
+2. **Run jxproxy** inside Termux on the device to verify end-to-end
+3. **CI/CD**: Wire build script into GitHub Actions for automated builds
+4. **Code signing**: Set up Apple Developer cert for distribution builds
+5. **Feature work**: Chat UI polish, permission server integration, GitHub OAuth
