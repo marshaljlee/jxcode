@@ -76,17 +76,27 @@ TOTAL_STEPS=6
 retry() {
   local label="$1" ; shift
   local attempt=0
+  local logfile ret
+  logfile=$(mktemp -t jxcode-XXXXXX.log)
   while [ $attempt -lt "$MAX_RETRIES" ]; do
     attempt=$((attempt + 1))
-    if "$@" 2>/dev/null; then
+    "$@" >"$logfile" 2>&1 && ret=0 || ret=$?
+    if [ $ret -eq 0 ]; then
+      rm -f "$logfile"
       return 0
     fi
     if [ $attempt -lt "$MAX_RETRIES" ]; then
-      warn "'${label}' failed (attempt ${attempt}/${MAX_RETRIES}), retrying in 3s..."
+      warn "'${label}' failed (attempt ${attempt}/${MAX_RETRIES})"
+      info "Last error: $(tail -3 "$logfile" | tr '\n' ' ')"
+      info "Retrying in 3s..."
       sleep 3
+    else
+      fail "'${label}' failed after ${MAX_RETRIES} attempts"
+      info "Full log at: ${logfile}"
+      info "Last 10 lines:"
+      tail -10 "$logfile" | while IFS= read -r line; do info "  ${line}"; done
     fi
   done
-  fail "'${label}' failed after ${MAX_RETRIES} attempts"
   return 1
 }
 
@@ -296,59 +306,95 @@ step3_jxproxy() {
 
   # Install npm/bun deps
   info "Installing dependencies..."
-  if command -v bun >/dev/null 2>&1; then
-    retry "bun install" bun install 2>&1 | tail -1 || {
-      warn "bun install failed — trying npm install..."
-      npm install 2>&1 | tail -1 || {
-        fail "Dependency install failed."
-        return 1
-      }
-    }
-  elif command -v npx >/dev/null 2>&1; then
-    npx --yes bun install 2>&1 | tail -1 || {
-      npm install 2>&1 | tail -1 || {
-        fail "Dependency install failed."
-        return 1
-      }
-    }
-  else
-    npm install 2>&1 | tail -1 || {
-      fail "Dependency install failed."
-      return 1
-    }
+  # On Termux: use npm (native) not bun (glibc binary — --version works but
+  # actual operations like install/build crash). Verify each approach works.
+  local deps_ok=false
+
+  if command -v npm >/dev/null 2>&1; then
+    info "Using npm (native Termux) for dependency install..."
+    # Remove bun.lock to avoid parser conflicts with npm
+    rm -f bun.lock bun.lockb 2>/dev/null || true
+    retry "npm install" npm install --no-audit --no-fund && deps_ok=true
+  fi
+
+  if [ "$deps_ok" = false ] && command -v bun >/dev/null 2>&1; then
+    # Quick test: bun actual operations (not just --version)
+    if echo "console.log('ok')" | bun -e "$(cat)" >/dev/null 2>&1; then
+      info "Trying bun install..."
+      retry "bun install" bun install 2>&1 | tail -3 && deps_ok=true
+    else
+      warn "bun binary fails on actual operations (glibc) — removing"
+      rm -f "$(command -v bun)" 2>/dev/null || true
+    fi
+  fi
+
+  if [ "$deps_ok" = false ] && command -v npx >/dev/null 2>&1; then
+    warn "npm install failed. Trying via npx + legacy deps..."
+    retry "npx install" npx --yes npm install --legacy-peer-deps 2>&1 | tail -3 && deps_ok=true
+  fi
+
+  if [ "$deps_ok" = false ]; then
+    fail "Dependency install failed after all attempts."
+    info "Try manually: cd ~/.jxproxy-source && npm install"
+    return 1
   fi
 
   # Build
   info "Building jxproxy for linux-arm64..."
   local build_ok=false
 
-  if command -v bun >/dev/null 2>&1; then
-    retry "bun build" bun run scripts/build.ts --target=linux-arm64 2>&1 | tail -5 && build_ok=true
+  # On Termux: prefer npx bun (works through node) or npm scripts
+  if [ "$deps_ok" = true ] && command -v npx >/dev/null 2>&1; then
+    info "Building via npx bun..."
+    retry "npx bun build" npx --yes bun run scripts/build.ts --target=linux-arm64 2>&1 | tail -5 && build_ok=true
   fi
 
-  if [ "$build_ok" = false ] && command -v npx >/dev/null 2>&1; then
-    info "Retrying build via npx..."
-    retry "npx bun build" npx --yes bun run scripts/build.ts --target=linux-arm64 2>&1 | tail -5 && build_ok=true
+  if [ "$build_ok" = false ] && command -v bun >/dev/null 2>&1; then
+    # Only try bun if it actually works for real operations
+    if echo "console.log('ok')" | bun -e "$(cat)" >/dev/null 2>&1; then
+      info "Building via bun..."
+      retry "bun build" bun run scripts/build.ts --target=linux-arm64 2>&1 | tail -5 && build_ok=true
+    fi
+  fi
+
+  if [ "$build_ok" = false ]; then
+    # Build failed — try downloading pre-built binary from GitHub releases.
+    # This is the standard approach used by jxproxy's Android installer too.
+    warn "Build failed — downloading pre-built jxproxy binary..."
+    local release_url="https://github.com/marshaljlee/jxproxy/releases/latest/download/jxproxy-linux-arm64"
+    local download_target="${BIN_DIR}/jxproxy"
+    if wget -q --timeout=60 "$release_url" -O "$download_target" 2>/dev/null; then
+      chmod 755 "$download_target"
+      local size
+      size=$(stat -c%s "$download_target" 2>/dev/null || stat -f%z "$download_target" 2>/dev/null || echo "0")
+      if [ "$size" -gt 5000000 ] && [ -x "$download_target" ]; then
+        ok "jxproxy pre-built binary downloaded → ${download_target} ($(echo "scale=1; ${size}/1000000" | bc) MB)"
+        build_ok=true
+      else
+        warn "Downloaded binary too small (${size} bytes). May be a stub."
+        rm -f "$download_target" 2>/dev/null || true
+      fi
+    fi
   fi
 
   # Check for output binary
   local binary=""
-  for candidate in dist/jxproxy-linux-arm64 dist/jxproxy dist/jxproxy-cli; do
-    if [ -f "$candidate" ]; then
+  for candidate in dist/jxproxy-linux-arm64 dist/jxproxy "${BIN_DIR}/jxproxy"; do
+    if [ -f "$candidate" ] && [ -x "$candidate" ]; then
       binary="$candidate"
       break
     fi
   done
 
   if [ -n "$binary" ]; then
-    cp "$binary" "$BIN_DIR/jxproxy"
-    chmod 755 "$BIN_DIR/jxproxy"
-    ok "jxproxy binary installed → ${BIN_DIR}/jxproxy ($(du -h "$binary" | cut -f1))"
+    if [ "$binary" != "${BIN_DIR}/jxproxy" ]; then
+      cp "$binary" "$BIN_DIR/jxproxy"
+      chmod 755 "$BIN_DIR/jxproxy"
+    fi
+    ok "jxproxy binary → ${BIN_DIR}/jxproxy"
   else
-    warn "Build output not found at expected paths."
-    warn "Searching for any compiled binary..."
-    find dist/ -type f -executable 2>/dev/null | head -5 || warn "No binaries found"
-    # Non-fatal — jxcode will connect to existing jxproxy if available
+    warn "jxproxy binary not found. jxcode will still work if jxproxy is"
+    warn "installed separately. See docs/android-arm64.md for options."
   fi
 
   divider
