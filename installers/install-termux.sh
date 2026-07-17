@@ -10,7 +10,11 @@
 #   5. Configuration + start instructions
 #
 # Usage:
-#   First clone the repo (private — raw CDN won't serve it):
+#   Run directly from Termux:
+#
+#     curl -fsSL https://raw.githubusercontent.com/marshaljlee/jxcode/main/installers/install-termux.sh | bash
+#
+#   Or clone and run:
 #
 #     pkg install git -y
 #     git clone https://github.com/marshaljlee/jxcode.git
@@ -133,7 +137,8 @@ JXPROXY_DIR="${HOME}/.jxproxy-source"
 if [ -d "$JXPROXY_DIR" ]; then
   echo -e "  ${BOLD}┃${NC}     Updating existing clone..."
   cd "$JXPROXY_DIR"
-  git pull --ff-only 2>&1 | tail -1
+  git fetch origin 2>&1 | tail -1
+  git reset --hard origin/main 2>&1 | tail -1
 else
   git clone --depth 1 https://github.com/marshaljlee/jxproxy.git "$JXPROXY_DIR"
   cd "$JXPROXY_DIR"
