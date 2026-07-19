@@ -551,7 +551,7 @@ CONFIGEOF
     fi
 
     local APK_FILE="${APK_DIR}/jxcode.apk"
-    local APK_URL="https://github.com/marshaljlee/jxcode/releases/latest/download/jxcode-arm64-v8a-release.apk"
+    local APK_URL="https://github.com/marshaljlee/jxcode/releases/latest/download/app-arm64-v8a-release.apk"
 
     info "Downloading jxcode APK..."
     if wget -q --timeout=30 "$APK_URL" -O "$APK_FILE" 2>/dev/null; then
