@@ -111,7 +111,7 @@ struct SettingsView: View {
         case .permissions:
             PermissionsSettingsTab()
         case .proxy:
-            ProxySettingsTab()
+            ProxyTabView()
         case .environment:
             EnvironmentSettingsTab()
         case .advanced:

@@ -98,6 +98,8 @@ struct ProjectWindowView: View {
                 AgentsListView()
             case .mcp:
                 MCPSidebarListView()
+            case .proxy:
+                proxySidebarContent
             }
 
             SidebarTabShortcuts(sidebarTab: $sidebarTab, fileSearchTrigger: $fileSearchTrigger, columnVisibility: $columnVisibility)
@@ -110,6 +112,24 @@ struct ProjectWindowView: View {
         }
         .background(ClaudeTheme.sidebarBackground)
         .navigationSplitViewColumnWidth(min: 220, ideal: 280, max: 360)
+    }
+
+    private var proxySidebarContent: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "bolt.shield.fill")
+                .font(.system(size: 32))
+                .foregroundStyle(ClaudeTheme.accent.opacity(0.5))
+            Text("Proxy Router")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(ClaudeTheme.textPrimary)
+            Text("Manage proxy settings in the main panel")
+                .font(.caption)
+                .foregroundStyle(ClaudeTheme.textTertiary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 16)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(ClaudeTheme.sidebarBackground)
     }
 
     // MARK: - Chat Toolbar Area
@@ -184,6 +204,8 @@ struct ProjectWindowView: View {
                 AgentWorkspaceView()
             case .mcp:
                 MCPManagerView()
+            case .proxy:
+                ProxyTabView()
             }
         }
         .toolbar {

@@ -22,6 +22,7 @@ struct MainView: View {
         case files = "Files"
         case agents = "Agents"
         case mcp = "MCP"
+        case proxy = "Proxy"
 
         var icon: String {
             switch self {
@@ -29,6 +30,7 @@ struct MainView: View {
             case .files: "folder"
             case .agents: "bolt.horizontal.fill"
             case .mcp: "server.rack"
+            case .proxy: "bolt.shield.fill"
             }
         }
     }
@@ -176,6 +178,8 @@ struct MainView: View {
                 AgentsListView()
             case .mcp:
                 MCPSidebarListView()
+            case .proxy:
+                proxySidebarContent
             }
 
             if windowState.selectedProject != nil && (sidebarTab == .history || sidebarTab == .files) {
@@ -193,6 +197,26 @@ struct MainView: View {
         .sheet(isPresented: $showGitHubSheet) {
             GitHubSheet()
         }
+    }
+
+    // MARK: - Proxy Sidebar
+
+    private var proxySidebarContent: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "bolt.shield.fill")
+                .font(.system(size: 32))
+                .foregroundStyle(ClaudeTheme.accent.opacity(0.5))
+            Text("Proxy Router")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(ClaudeTheme.textPrimary)
+            Text("Manage proxy settings in the main panel")
+                .font(.caption)
+                .foregroundStyle(ClaudeTheme.textTertiary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 16)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(ClaudeTheme.sidebarBackground)
     }
 
     // MARK: - Chat Toolbar Area (moved from old ChatView)
@@ -296,6 +320,8 @@ struct MainView: View {
                 AgentWorkspaceView()
             case .mcp:
                 MCPManagerView()
+            case .proxy:
+                ProxyTabView()
             }
         }
         .sheet(item: Bindable(windowState).inspectorFile) { file in

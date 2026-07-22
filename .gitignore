@@ -1,26 +1,62 @@
-# Xcode user data
-xcuserdata/
-*.xcuserdatad/
-
 # macOS
 .DS_Store
+*.swp
+*.pyc
 
-# gstack browser logs
-.gstack/
+# IDE configs
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
 
-# Claude config
+# Xcode user data
+xcuserdata/
+*.xcuserstate
+
+# AI agent tool configs
+.agents/
 .claude/
+.codex/
+.impeccable/
+.auto-claude/
+.app-lifecycle/
 
-# Deployment environment variables (contains secrets)
-scripts/.env
+# Terminal session data
+.TerMinal/
 
-# Build artifacts
+# GitHub / GitLab templates
+.github/
+.gitlab/
+
+# Flutter/Dart build output
 build/
-Packages/.build/
+.dart_tool/
+.flutter-plugins-dependencies
+.flutter-plugins
+.pub-cache/
+.pub/
+**/doc/api/
+**/ios/Flutter/.last_build_id
+app.*.symbols
+app.*.map.json
+coverage/
 
-# Sparkle private key (only public key is included in Xcode build settings)
-scripts/.sparkle_private_key
+# Android build artifacts
+/android/app/debug/
+/android/app/profile/
+/android/app/release/
 
-# Sparkle CLI tools (reinstallable via setup_sparkle.sh)
-scripts/sparkle_tools/
-JXCODE/claude
+# Build bundles
+jxcode-debug.app/
+jxcode-release.app/
+
+# Status files
+.status.md
+
+# Claude workflow template
+CLAUDE.workflow.md
+
+# Duplicate / temp files
+.about-needed
+*.lock
