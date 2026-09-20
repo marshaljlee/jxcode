@@ -143,6 +143,49 @@ final class HTTPMessageTests: XCTestCase {
         )
         XCTAssertTrue(response.hasPrefix("HTTP/1.1 400"), response)
     }
+
+    // MARK: Where the head ends
+
+    /// A head ending in bare LF, followed by a body containing `\r\n\r\n`.
+    ///
+    /// The CRLF search used to win, find its terminator *inside the body*, and
+    /// consume body bytes as head — after which the parser waited for the rest
+    /// of a body it had already half-read.
+    func testABareLFHeadIsNotBrokenByCRLFInTheBody() throws {
+        let body = "{\"a\":\"1\r\n\r\n2\"}"
+        let raw = "POST /v1/messages HTTP/1.1\nHost: localhost\n"
+            + "Content-Length: \(body.utf8.count)\n\n" + body
+        var p = parser()
+        p.consume(Data(raw.utf8))
+        let request = try XCTUnwrap(try p.nextRequest())
+        XCTAssertEqual(request.bodyText, body)
+    }
+
+    /// The other direction: a CRLF head whose body holds a bare blank line
+    /// still ends at the CRLF, because that one comes first.
+    func testACRLFHeadStillWinsWhenItIsEarlier() throws {
+        let body = "a\n\nb"
+        let raw = "POST /v1/messages HTTP/1.1\r\nHost: localhost\r\n"
+            + "Content-Length: \(body.utf8.count)\r\n\r\n" + body
+        var p = parser()
+        p.consume(Data(raw.utf8))
+        let request = try XCTUnwrap(try p.nextRequest())
+        XCTAssertEqual(request.bodyText, body)
+    }
+
+    /// Pipelined, with mixed line endings: the boundary is found per request,
+    /// not once for the whole buffer.
+    func testMixedLineEndingsAcrossPipelinedRequests() throws {
+        var p = parser()
+        p.consume(Data("POST /a HTTP/1.1\nContent-Length: 2\n\nhi".utf8))
+        p.consume(Data("POST /b HTTP/1.1\r\nContent-Length: 2\r\n\r\nho".utf8))
+        let first = try XCTUnwrap(try p.nextRequest())
+        let second = try XCTUnwrap(try p.nextRequest())
+        XCTAssertEqual(first.path, "/a")
+        XCTAssertEqual(first.bodyText, "hi")
+        XCTAssertEqual(second.path, "/b")
+        XCTAssertEqual(second.bodyText, "ho")
+    }
 }
 
 // MARK: - Raw socket

@@ -217,14 +217,27 @@ public struct HTTPRequestParser {
         return length
     }
 
-    /// Locate the end of the head, accepting either CRLF or bare LF.
+    /// Locate the end of the head: the first blank line, whichever spelling.
     ///
     /// Bare LF turns up from hand-rolled clients and from anything piping
     /// through `nc`. Rejecting it would be technically correct and practically
-    /// annoying.
+    /// annoying, so both spellings are accepted — and the **earlier** one wins.
+    ///
+    /// Preferring one over the other is not style, it is a bug. A head ending in
+    /// bare LF followed by a body containing `\r\n\r\n` — ordinary JSON with a
+    /// blank line in it — has its CRLF terminator found *inside the body*. Body
+    /// bytes are then consumed as head, and the parser waits for the rest of a
+    /// body it has already half-read, forever. The first blank line ends the
+    /// head by definition, so whichever arrives first is the right answer.
     private func findHeadTerminator() -> Range<Data.Index>? {
-        if let range = buffer.range(of: Self.crlfTerminator) { return range }
-        return buffer.range(of: Self.lfTerminator)
+        let crlf = buffer.range(of: Self.crlfTerminator)
+        let lf = buffer.range(of: Self.lfTerminator)
+        switch (crlf, lf) {
+        case let (crlf?, lf?): return crlf.lowerBound <= lf.lowerBound ? crlf : lf
+        case let (crlf?, nil): return crlf
+        case let (nil, lf?):   return lf
+        case (nil, nil):       return nil
+        }
     }
 
     private static func parseHead(_ data: Data) -> ParsedHead? {
