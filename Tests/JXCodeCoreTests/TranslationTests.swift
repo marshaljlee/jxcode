@@ -983,3 +983,137 @@ final class AnthropicContentBlockTests: XCTestCase {
         XCTAssertEqual(String(decoding: encoded, as: UTF8.self), #""be brief""#)
     }
 }
+
+// MARK: - OpenAI SSE framing
+
+/// The reverse of `TranslationStreamTests`.
+///
+/// A caller that speaks OpenAI and a provider that speaks Anthropic meet in the
+/// middle: the answer is fetched whole and re-framed here. These pin the frame
+/// *shape*, which is the part a client's parser depends on and the part no
+/// compile error can catch.
+final class OpenAISSEFramesTests: XCTestCase {
+
+    private func response(
+        _ content: [AnthropicContentBlock],
+        stopReason: String = "end_turn",
+        inputTokens: Int = 10,
+        outputTokens: Int = 4
+    ) -> OpenAIChatResponse {
+        Translation.openAIResponse(from: AnthropicResponse(
+            id: "msg_1",
+            model: "claude-sonnet-4-5",
+            content: content,
+            stopReason: stopReason,
+            usage: AnthropicUsage(inputTokens: inputTokens, outputTokens: outputTokens)
+        ))
+    }
+
+    /// Parse the JSON bodies out of a frame sequence. `[DONE]` is not JSON, so it
+    /// drops out here.
+    private func bodies(_ frames: [String]) -> [[String: Any]] {
+        frames.compactMap { frame in
+            guard let line = frame.split(separator: "\n").first(where: { $0.hasPrefix("data: ") })
+            else { return nil }
+            return try? JSONSerialization.jsonObject(with: Data(line.dropFirst(6).utf8))
+                as? [String: Any]
+        }
+    }
+
+    private func firstChoice(_ body: [String: Any]) -> [String: Any]? {
+        (body["choices"] as? [[String: Any]])?.first
+    }
+
+    func testTextAnswerBecomesARoleChunkThenAFinishChunk() throws {
+        let frames = Translation.openAISSEFrames(from: response([.text("here you go")]))
+        XCTAssertEqual(frames.last, "data: [DONE]\n\n", "the client hangs without it")
+
+        let parsed = bodies(frames)
+        XCTAssertEqual(parsed.count, 3, "content, finish_reason, usage")
+
+        let first = try XCTUnwrap(parsed.first)
+        XCTAssertEqual(first["id"] as? String, "msg_1")
+        XCTAssertEqual(first["object"] as? String, "chat.completion.chunk")
+        let delta = try XCTUnwrap(firstChoice(first)?["delta"] as? [String: Any])
+        XCTAssertEqual(delta["role"] as? String, "assistant")
+        XCTAssertEqual(delta["content"] as? String, "here you go")
+
+        // Null rather than absent: a strict client distinguishes the two.
+        XCTAssertTrue(firstChoice(first)?.keys.contains("finish_reason") == true)
+        XCTAssertTrue(firstChoice(first)?["finish_reason"] is NSNull)
+
+        XCTAssertEqual(firstChoice(try XCTUnwrap(parsed.dropFirst().first))?["finish_reason"] as? String,
+                       "stop")
+    }
+
+    /// Reasoning has to survive this direction too, because `StreamTranslator`
+    /// reads it back out of a delta as `anyReasoning` on the way through.
+    func testReasoningRidesAlongsideTheText() throws {
+        let parsed = bodies(Translation.openAISSEFrames(
+            from: response([.thinking("hmm"), .text("answer")])
+        ))
+        let delta = try XCTUnwrap(firstChoice(try XCTUnwrap(parsed.first))?["delta"] as? [String: Any])
+        XCTAssertEqual(delta["reasoning_content"] as? String, "hmm")
+        XCTAssertEqual(delta["content"] as? String, "answer")
+    }
+
+    /// A tool call has to arrive as `tool_calls` with the id and name intact, and
+    /// the finish reason has to say `tool_calls` — a client that reads `stop`
+    /// treats the turn as finished and never runs the tool.
+    func testToolCallArrivesWithItsIdAndName() throws {
+        let parsed = bodies(Translation.openAISSEFrames(from: response(
+            [.toolUse(id: "toolu_1", name: "read", input: .object(["path": .string("/x")]))],
+            stopReason: "tool_use"
+        )))
+
+        let delta = try XCTUnwrap(firstChoice(try XCTUnwrap(parsed.first))?["delta"] as? [String: Any])
+        let calls = try XCTUnwrap(delta["tool_calls"] as? [[String: Any]])
+        XCTAssertEqual(calls.count, 1)
+        XCTAssertEqual(calls[0]["id"] as? String, "toolu_1")
+        XCTAssertEqual(calls[0]["index"] as? Int, 0)
+
+        let function = try XCTUnwrap(calls[0]["function"] as? [String: Any])
+        XCTAssertEqual(function["name"] as? String, "read")
+        // The arguments are a JSON *string*, as OpenAI sends them. Asserted by
+        // parsing it, not by comparing bytes, so the escaping is free to change.
+        let arguments = try XCTUnwrap(function["arguments"] as? String)
+        let decoded = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(arguments.utf8)) as? [String: Any]
+        )
+        XCTAssertEqual(decoded["path"] as? String, "/x")
+
+        XCTAssertEqual(
+            firstChoice(try XCTUnwrap(parsed.dropFirst().first))?["finish_reason"] as? String,
+            "tool_calls"
+        )
+    }
+
+    /// The usage trailer is what a client that asked for
+    /// `stream_options.include_usage` reads its token counts from, and it is the
+    /// reason the sequence is three chunks rather than two.
+    func testUsageArrivesInATrailingChunkWithNoChoices() throws {
+        let parsed = bodies(Translation.openAISSEFrames(from: response([.text("hi")])))
+        let last = try XCTUnwrap(parsed.last)
+
+        let choices = try XCTUnwrap(last["choices"] as? [Any])
+        XCTAssertTrue(choices.isEmpty, "the usage chunk carries no choices")
+
+        let usage = try XCTUnwrap(last["usage"] as? [String: Any])
+        XCTAssertEqual(usage["prompt_tokens"] as? Int, 10)
+        XCTAssertEqual(usage["completion_tokens"] as? Int, 4)
+        XCTAssertEqual(usage["total_tokens"] as? Int, 14)
+    }
+
+    /// Every frame has to stand on its own as SSE. This is the assertion the
+    /// interpolated error frame on the OpenAI side would have failed.
+    func testEveryFrameIsValidSSE() throws {
+        for frame in Translation.openAISSEFrames(from: response([.text("x")])) {
+            XCTAssertTrue(frame.hasPrefix("data: "), frame)
+            XCTAssertTrue(frame.hasSuffix("\n\n"), frame)
+            let payload = String(frame.dropFirst(6).dropLast(2))
+            // `[DONE]` is the one frame that is deliberately not JSON.
+            if payload == "[DONE]" { continue }
+            XCTAssertNoThrow(try JSONSerialization.jsonObject(with: Data(payload.utf8)), payload)
+        }
+    }
+}

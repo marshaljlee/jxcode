@@ -1062,7 +1062,37 @@ public final class ModelRouter: @unchecked Sendable {
         }
 
         // Upstream is Anthropic but the caller speaks OpenAI.
-        let anthropic = Translation.anthropicRequest(from: openAI)
+        //
+        // `stream` is forced off outbound, and that is the whole fix for a
+        // guaranteed 500. `Translation.anthropicRequest` copies the caller's
+        // `stream` straight through, Anthropic answers a streaming request with
+        // `text/event-stream`, and the code below decodes a single
+        // `AnthropicResponse` from it — so every `stream: true` call from Codex
+        // or Gemini CLI against an Anthropic provider failed, after the upstream
+        // had already been paid for the turn.
+        //
+        // Forwarding the event stream instead is not an option: the caller parses
+        // OpenAI chunks and would not understand `content_block_delta`. So the
+        // answer is fetched whole and re-framed as OpenAI chunks below.
+        var anthropic = Translation.anthropicRequest(from: openAI)
+        anthropic.stream = false
+
+        if streaming {
+            // Bound as a `let` so the streaming closure captures a value rather
+            // than a mutable local, which Swift 6 rejects.
+            let outbound = anthropic
+            let head = HTTPResponse.stream(status: 200, headers: Self.sseHeaders)
+            let plan: @Sendable (StreamSink) async -> Void = { [weak self] sink in
+                guard let self else { return }
+                await self.pipeTranslatedAnthropic(
+                    provider: provider,
+                    body: outbound,
+                    sink: sink
+                )
+            }
+            return .stream(head, plan)
+        }
+
         let (data, status) = try await post(
             provider: provider,
             url: provider.chatURL,
@@ -1360,8 +1390,73 @@ public final class ModelRouter: @unchecked Sendable {
             if !pending.isEmpty { sink.send(String(decoding: pending, as: UTF8.self)) }
         } catch {
             log.writeError("raw passthrough failed: \(error)")
-            sink.send(SSEWriter.frame(data: "{\"error\":{\"message\":\"\(error)\"}}"))
+            sink.send(Self.openAIErrorFrame(error))
         }
+    }
+
+    /// Fetch a complete answer from an Anthropic upstream and re-frame it as an
+    /// OpenAI SSE stream.
+    ///
+    /// Reached when the caller speaks OpenAI, asked for `stream: true`, and the
+    /// selected provider is natively Anthropic. The request handed in already has
+    /// `stream` forced off — see the call site — because the alternative was a
+    /// guaranteed 500: Anthropic answers a streaming request with
+    /// `text/event-stream`, and no single `AnthropicResponse` can be decoded from
+    /// that.
+    ///
+    /// Deliberately not incremental. Translating Anthropic events into OpenAI
+    /// chunks as they arrive would be the better answer and is a larger job; this
+    /// is the honest version of "correct, whole answer, one burst".
+    private func pipeTranslatedAnthropic(
+        provider: Provider,
+        body: AnthropicRequest,
+        sink: StreamSink
+    ) async {
+        do {
+            let request = try makeUpstreamRequest(
+                provider: provider,
+                url: provider.chatURL,
+                body: try JSONEncoder().encode(body)
+            )
+            let (data, response) = try await session.data(for: request)
+
+            guard let http = response as? HTTPURLResponse else {
+                throw RouterError.upstream("response was not HTTP")
+            }
+            guard (200..<300).contains(http.statusCode) else {
+                throw RouterError.upstream(
+                    "HTTP \(http.statusCode): \(String(decoding: data.prefix(400), as: UTF8.self))"
+                )
+            }
+            guard let decoded = try? JSONDecoder().decode(AnthropicResponse.self, from: data) else {
+                throw RouterError.upstream("reply was not an Anthropic message")
+            }
+
+            let translated = Translation.openAIResponse(from: decoded)
+            for frame in Translation.openAISSEFrames(from: translated) {
+                sink.send(frame)
+            }
+        } catch {
+            log.writeError("anthropic→openai stream failed: \(error)")
+            sink.send(Self.openAIErrorFrame(error))
+        }
+    }
+
+    /// An error, framed the way an OpenAI streaming client expects.
+    ///
+    /// Built through `JSONValue` rather than by interpolation. The message
+    /// routinely carries an upstream body verbatim — quotes, backslashes and all
+    /// — and splicing that into a JSON string produced a frame no client could
+    /// parse, which turns a reportable upstream error into a silent protocol
+    /// failure. The Anthropic side has always encoded its error frames through
+    /// `JSONValue`; this is the OpenAI half catching up.
+    private static func openAIErrorFrame(_ error: Error) -> String {
+        SSEWriter.frame(data: JSONValue.object([
+            "error": .object([
+                "type": .string("api_error"),
+                "message": .string("\(error)"),
+            ])
+        ]).jsonString())
     }
 
     // MARK: Model resolution

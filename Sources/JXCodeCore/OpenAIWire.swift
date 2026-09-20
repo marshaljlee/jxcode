@@ -422,3 +422,65 @@ public struct OllamaTagList: Codable, Sendable {
 
     public var models: [Entry]
 }
+
+// MARK: - Server-sent events
+
+/// Frames OpenAI streaming chunks.
+///
+/// The mirror of `AnthropicSSE`, and in the same place relative to its own wire
+/// types. `SSEWriter.frame` writes the `data: …\n\n` envelope; this supplies the
+/// chunk bodies.
+public enum OpenAISSE {
+
+    /// One `chat.completion.chunk`.
+    ///
+    /// `delta` carries only what changed, which is OpenAI's own convention and
+    /// what every client's parser expects. `finish_reason` is written explicitly
+    /// as null on every chunk but the last: a missing key and a null one are not
+    /// the same thing to a strict client.
+    public static func chunk(
+        id: String,
+        created: Int,
+        model: String,
+        delta: [String: JSONValue],
+        finishReason: String? = nil
+    ) -> String {
+        SSEWriter.frame(data: JSONValue.object([
+            "id": .string(id),
+            "object": .string("chat.completion.chunk"),
+            "created": .number(Double(created)),
+            "model": .string(model),
+            "choices": .array([
+                .object([
+                    "index": .number(0),
+                    "delta": .object(delta),
+                    "finish_reason": finishReason.map { JSONValue.string($0) } ?? .null,
+                ])
+            ]),
+        ]).jsonString())
+    }
+
+    /// The trailing usage-only chunk: an empty `choices` array and the counts.
+    ///
+    /// Real OpenAI output sends this after the `finish_reason` chunk, which is
+    /// exactly why `StreamTranslator` refuses to close a message on
+    /// `finish_reason` alone. A client that asked for
+    /// `stream_options.include_usage` takes its token counts from here, so
+    /// omitting it leaves its context accounting on an estimate for the rest of
+    /// the session.
+    public static func usageChunk(
+        id: String,
+        created: Int,
+        model: String,
+        usage: JSONValue
+    ) -> String {
+        SSEWriter.frame(data: JSONValue.object([
+            "id": .string(id),
+            "object": .string("chat.completion.chunk"),
+            "created": .number(Double(created)),
+            "model": .string(model),
+            "choices": .array([]),
+            "usage": usage,
+        ]).jsonString())
+    }
+}

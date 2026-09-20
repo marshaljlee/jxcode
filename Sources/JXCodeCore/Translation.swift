@@ -622,6 +622,85 @@ public enum Translation {
         )
     }
 
+    /// Re-frame a complete OpenAI response as the SSE chunk sequence a streaming
+    /// caller expects.
+    ///
+    /// The mirror of `StreamTranslator`, for the one path where the answer has to
+    /// be fetched whole: a caller that speaks OpenAI, pointed at a natively
+    /// Anthropic provider. The router cannot forward the Anthropic event stream —
+    /// the caller parses OpenAI chunks and would not understand
+    /// `content_block_delta` — and it cannot hand back a buffered body either,
+    /// because a client that asked for `stream: true` is reading SSE. So the
+    /// request goes out with `stream: false` and the finished answer is framed
+    /// here.
+    ///
+    /// Correct, and deliberately not incremental: the caller sees the whole
+    /// answer arrive at once rather than token by token. The alternative on this
+    /// path is a 500.
+    ///
+    /// The sequence is the one real OpenAI output uses, and it is three chunks
+    /// rather than one for the same reason `StreamTranslator` does not close a
+    /// message on `finish_reason`: the usage counts arrive in a *later* chunk
+    /// with an empty `choices` array, and a client that asked for
+    /// `stream_options.include_usage` reads them from there.
+    public static func openAISSEFrames(from response: OpenAIChatResponse) -> [String] {
+        let choice = response.first
+        let id = response.id ?? newMessageID()
+        let created = response.created ?? Int(Date().timeIntervalSince1970)
+        let model = response.model ?? ""
+
+        var delta: [String: JSONValue] = ["role": .string("assistant")]
+        // Whatever the forward path reads back out of a delta has to be written
+        // here: `StreamTranslator` looks for `anyReasoning`, so a reasoning
+        // model's chain of thought survives this direction too.
+        if let reasoning = choice?.payload?.anyReasoning, !reasoning.isEmpty {
+            delta["reasoning_content"] = .string(reasoning)
+        }
+        if let text = choice?.payload?.content?.plainText, !text.isEmpty {
+            delta["content"] = .string(text)
+        }
+        if let calls = choice?.payload?.toolCalls, !calls.isEmpty {
+            delta["tool_calls"] = .array(calls.enumerated().map { offset, call in
+                .object([
+                    "index": .number(Double(call.index ?? offset)),
+                    "id": .string(call.id ?? newToolUseID()),
+                    "type": .string(call.type ?? "function"),
+                    "function": .object([
+                        "name": .string(call.function?.name ?? ""),
+                        "arguments": .string(call.function?.arguments ?? "{}"),
+                    ]),
+                ])
+            })
+        }
+
+        var frames = [
+            OpenAISSE.chunk(id: id, created: created, model: model, delta: delta),
+            OpenAISSE.chunk(
+                id: id,
+                created: created,
+                model: model,
+                delta: [:],
+                finishReason: choice?.finishReason ?? "stop"
+            ),
+        ]
+
+        if let reported = response.usage {
+            frames.append(OpenAISSE.usageChunk(
+                id: id,
+                created: created,
+                model: model,
+                usage: .object([
+                    "prompt_tokens": .number(Double(reported.promptTokens ?? 0)),
+                    "completion_tokens": .number(Double(reported.completionTokens ?? 0)),
+                    "total_tokens": .number(Double(reported.totalTokens ?? 0)),
+                ])
+            ))
+        }
+
+        frames.append(SSEWriter.done)
+        return frames
+    }
+
     /// Convert an Anthropic request into an OpenAI one for the reverse direction.
     ///
     /// Reuses the forward path; the field mapping is identical.

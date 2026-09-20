@@ -29,6 +29,18 @@ final class FakeUpstream: @unchecked Sendable {
     ],"usage":{"prompt_tokens":9,"completion_tokens":4,"total_tokens":13}}
     """
 
+    /// JSON returned for a non-streaming **Anthropic** messages request.
+    ///
+    /// The router's Anthropic-upstream path posts to `/v1/messages` and decodes
+    /// an `AnthropicResponse`, so the fake has to answer in Anthropic's shape.
+    /// The path is the one thing that distinguishes the two, and it is the same
+    /// distinction the router itself keys off (`ProviderKind.chatPath`).
+    var anthropicCompletionBody: String = """
+    {"id":"msg_test","type":"message","role":"assistant","model":"fake-model",
+     "content":[{"type":"text","text":"hello from upstream"}],
+     "stop_reason":"end_turn","usage":{"input_tokens":9,"output_tokens":4}}
+    """
+
     /// Raw `data:` payloads streamed for a streaming completion.
     var streamPayloads: [String] = [
         #"{"id":"c","choices":[{"index":0,"delta":{"role":"assistant","content":"Hel"}}]}"#,
@@ -118,6 +130,13 @@ final class FakeUpstream: @unchecked Sendable {
     private func respond(to request: HTTPRequest, on connection: NWConnection) {
         if request.path.hasSuffix("/models") {
             send(connection, json: #"{"object":"list","data":[{"id":"fake-model","object":"model"}]}"#)
+            return
+        }
+
+        // A native Anthropic upstream answers in Anthropic's shape. Keyed off the
+        // path because that is exactly what the router keys off.
+        if request.path.hasSuffix("/v1/messages") {
+            send(connection, json: anthropicCompletionBody)
             return
         }
 
@@ -245,6 +264,20 @@ private func eventNames(in transcript: String) -> [String] {
         names.append(String(line.dropFirst(7)).trimmingCharacters(in: .whitespaces))
     }
     return names
+}
+
+/// Extract the `data:` payloads from a raw OpenAI SSE transcript.
+///
+/// The OpenAI envelope has no `event:` line, so the payload is the only thing
+/// there is to read.
+private func dataPayloads(in transcript: String) -> [String] {
+    var payloads: [String] = []
+    for line in transcript.split(separator: "\n") {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("data:") else { continue }
+        payloads.append(String(trimmed.dropFirst(5)).trimmingCharacters(in: .whitespaces))
+    }
+    return payloads
 }
 
 // MARK: - Tests
@@ -481,6 +514,81 @@ final class RouterEndToEndTests: XCTestCase {
         harness.router.stop()
         harness.router.stop()
         XCTAssertFalse(harness.router.isRunning)
+    }
+
+    // MARK: An OpenAI caller against an Anthropic upstream
+    //
+    // The reverse of the usual direction, and the one that was broken: the
+    // caller asked for `stream: true`, the router passed that through to
+    // Anthropic, and then tried to decode an event stream as a single JSON
+    // message. Every such request 500'd — after the upstream had been paid for
+    // the turn — which is why the first assertion here is simply "this is SSE at
+    // all".
+
+    func testStreamingChatCompletionsAgainstAnAnthropicUpstreamIsFramedAsOpenAIChunks() async throws {
+        let harness = try RouterHarness(kind: .anthropic)
+        let transcript = try await harness.streamPost("/v1/chat/completions", body: """
+        {"model":"fake-model","stream":true,"messages":[{"role":"user","content":"say hello"}]}
+        """)
+
+        XCTAssertTrue(transcript.contains("data: "), "expected SSE, got: \(transcript)")
+
+        let payloads = dataPayloads(in: transcript)
+        XCTAssertEqual(payloads.last, "[DONE]", "the stream has to terminate or the client hangs")
+
+        // `[DONE]` is not JSON, so it drops out here: three chunks and a sentinel.
+        let chunks = payloads.dropLast().compactMap {
+            try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any]
+        }
+        XCTAssertEqual(chunks.count, 3, "content, finish_reason, usage")
+
+        let first = try XCTUnwrap(chunks.first)
+        XCTAssertEqual(first["object"] as? String, "chat.completion.chunk")
+        let delta = try XCTUnwrap(
+            (first["choices"] as? [[String: Any]])?.first?["delta"] as? [String: Any]
+        )
+        XCTAssertEqual(delta["role"] as? String, "assistant")
+        XCTAssertEqual(delta["content"] as? String, "hello from upstream")
+
+        let finish = try XCTUnwrap(
+            (chunks[1]["choices"] as? [[String: Any]])?.first?["finish_reason"] as? String
+        )
+        XCTAssertEqual(finish, "stop")
+
+        let trailer = try XCTUnwrap(chunks[2]["choices"] as? [Any])
+        XCTAssertTrue(trailer.isEmpty, "the usage chunk carries no choices")
+        let usage = try XCTUnwrap(chunks[2]["usage"] as? [String: Any])
+        XCTAssertEqual(usage["prompt_tokens"] as? Int, 9)
+        XCTAssertEqual(usage["completion_tokens"] as? Int, 4)
+    }
+
+    /// The outbound request must not ask for a stream. That single field is what
+    /// broke this path, so it is asserted on the wire rather than inferred from
+    /// the reply.
+    func testStreamingAgainstAnAnthropicUpstreamAsksForACompleteAnswer() async throws {
+        let harness = try RouterHarness(kind: .anthropic)
+        _ = try await harness.streamPost("/v1/chat/completions", body: """
+        {"model":"fake-model","stream":true,"messages":[{"role":"user","content":"hi"}]}
+        """)
+
+        let sent = try XCTUnwrap(harness.upstream.bodyTexts.last)
+        XCTAssertTrue(sent.contains(#""stream":false"#), "upstream body was: \(sent)")
+        // And it has to be an Anthropic request, not an OpenAI one.
+        XCTAssertTrue(sent.contains(#""max_tokens""#), sent)
+    }
+
+    /// The non-streaming half of the same path, which had no test at all.
+    func testChatCompletionsAgainstAnAnthropicUpstreamIsTranslated() async throws {
+        let harness = try RouterHarness(kind: .anthropic)
+        let (data, response) = try await harness.post("/v1/chat/completions", body: """
+        {"model":"fake-model","messages":[{"role":"user","content":"hi"}]}
+        """)
+
+        XCTAssertEqual(response.statusCode, 200)
+        let payload = try JSONDecoder().decode(OpenAIChatResponse.self, from: data)
+        XCTAssertEqual(payload.first?.message?.content?.plainText, "hello from upstream")
+        XCTAssertEqual(payload.first?.finishReason, "stop")
+        XCTAssertEqual(payload.usage?.promptTokens, 9)
     }
 }
 
