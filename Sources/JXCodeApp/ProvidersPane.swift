@@ -415,6 +415,10 @@ struct ProvidersPane: View {
         case .created:         return Theme.success
         case .merged:          return Theme.accent
         case .unchanged:       return Theme.textTertiary
+        // Not a failure of ours to fix, but not silent either: the file is the
+        // user's and we declined to touch it, so it earns a colour that reads as
+        // "look at this" rather than as "nothing happened".
+        case .refused:         return Theme.warning
         case .environmentOnly: return Theme.textTertiary
         case .notApplicable:   return Theme.textTertiary
         }

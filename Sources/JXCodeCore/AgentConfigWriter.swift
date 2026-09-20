@@ -25,6 +25,9 @@ public enum AgentConfigWriter {
             case merged
             /// The file already said the right thing.
             case unchanged
+            /// The file exists but is not something we can safely rewrite, so it
+            /// was left exactly as it was.
+            case refused
             /// Pointed at the router through the environment alone.
             case environmentOnly
             /// Deliberately not routed.
@@ -40,6 +43,21 @@ public enum AgentConfigWriter {
         public var summary: String {
             let location = path.map { " — \($0.path)" } ?? ""
             return "\(agentName): \(action.rawValue)\(location)"
+        }
+
+        /// Whether this agent is pointed at the router now.
+        ///
+        /// `.refused` is not: the file was left exactly as it was, so the agent
+        /// still points wherever it did before. Counting it as bound would
+        /// overstate what the bind actually did — the header would claim an
+        /// agent is on the router while its config still names Anthropic.
+        public var isRouted: Bool {
+            switch action {
+            case .created, .merged, .unchanged, .environmentOnly:
+                return true
+            case .refused, .notApplicable:
+                return false
+            }
         }
     }
 
@@ -204,10 +222,41 @@ public enum AgentConfigWriter {
                 let file = paths.claudeConfig.appendingPathComponent("settings.json")
                 guard let root = readJSONObject(file) else { continue }
                 guard var environment = root["env"] as? [String: Any] else { continue }
-                let managed = claudeEnvironmentKeys
-                let before = environment.count
-                for key in managed { environment.removeValue(forKey: key) }
-                guard environment.count != before else { continue }
+                let before = environment
+
+                // Put the keys we own back to the values the file held before we
+                // first wrote to it, rather than deleting them.
+                //
+                // Deleting was the bug. `ANTHROPIC_API_KEY` is deliberately
+                // overwritten with an empty string on bind — a real key left in
+                // place would send Claude Code straight to api.anthropic.com,
+                // bypassing the router this feature exists to provide — and
+                // unbinding then removed the key outright. A user who had a real
+                // key in `settings.json` lost it: the one value the sandbox was
+                // meant to be protecting, thrown away by the operation that
+                // claims to give the file back.
+                //
+                // `backUp` copies the file aside on the first write, so the
+                // backup is exactly the state to restore into. With no backup
+                // the file is one we created and every managed key in it is
+                // ours, so removing them is still the right undo.
+                let original = originalManagedEnvironment(for: file)
+                for key in claudeEnvironmentKeys {
+                    if let restored = original[key] {
+                        environment[key] = restored
+                    } else {
+                        environment.removeValue(forKey: key)
+                    }
+                }
+
+                // Compared as rendered JSON, not by key count. Restoring a key
+                // we had overwritten changes what the file says without changing
+                // how many keys it holds, so a count test would skip the write
+                // and leave our empty string sitting where the user's real key
+                // used to be.
+                guard try renderJSONObject(environment) != renderJSONObject(before) else {
+                    continue
+                }
 
                 var updated = root
                 if environment.isEmpty {
@@ -232,7 +281,11 @@ public enum AgentConfigWriter {
                 guard let existing = try? String(contentsOf: file, encoding: .utf8) else { continue }
                 // The shape-preserving variant, not the writer's one: revert has
                 // to give the file back as it found it, not reformat it.
-                let stripped = removeManagedBlockPreservingShape(from: existing)
+                var stripped = removeManagedBlockPreservingShape(from: existing)
+                // Order matters: uncommenting a key while our block is still in
+                // the file would produce exactly the duplicate TOML key that
+                // commenting it out existed to avoid.
+                stripped = restoreCommentedOutTopLevelKeys(in: stripped)
                 guard stripped != existing else { continue }
 
                 // Same rule, same reason: a `config.toml` that held nothing but
@@ -301,11 +354,42 @@ public enum AgentConfigWriter {
         )
 
         let existed = FileManager.default.fileExists(atPath: file.path)
-        if existed { backUp(file) }
 
         // Merge rather than replace: settings.json also holds permission rules,
         // hooks and status-line configuration that are none of our business.
-        var root = readJSONObject(file) ?? [:]
+        //
+        // A file that is present but unparseable is one we must not rewrite at
+        // all. This used to be `readJSONObject(file) ?? [:]`, so a
+        // `settings.json` we could not read — a trailing comma, JSONC comments,
+        // any hand-edit — was replaced wholesale by an object holding nothing
+        // but our own keys, taking every permission rule and hook with it. A
+        // backup was made, but the file the agent actually reads was gone.
+        // `ConnectorBinder` refuses in exactly this situation and for exactly
+        // this reason; the two writers now agree.
+        var root: [String: Any] = [:]
+        if existed {
+            let current = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
+            if !current.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                guard let parsed = readJSONObject(file) else {
+                    return Report(
+                        agentID: agent.id,
+                        agentName: agent.name,
+                        action: .refused,
+                        path: file,
+                        notes: [
+                            "\(file.lastPathComponent) is not a JSON object — left untouched"
+                        ]
+                    )
+                }
+                root = parsed
+            }
+        }
+
+        // Only once the file is known to be one we can merge into. A refusal
+        // has to leave no trace, and a stray `*.jxcode-backup` sitting next to a
+        // file we never touched is a trace.
+        if existed { backUp(file) }
+
         var environment = (root["env"] as? [String: Any]) ?? [:]
 
         environment["ANTHROPIC_BASE_URL"] = routerURL
@@ -375,6 +459,14 @@ public enum AgentConfigWriter {
 
     private static let blockStart = "# >>> jxcode router >>>"
     private static let blockEnd = "# <<< jxcode router <<<"
+
+    /// Appended to a user's own key when the writer comments it out, so `revert`
+    /// can find the line again and put it back.
+    ///
+    /// One constant used by both directions, because the write and the undo have
+    /// to agree character for character: a typo in either would leave the user's
+    /// setting disabled with nothing on disk to say why.
+    static let supersededMarker = "# superseded by the jxcode router block above"
 
     private static func writeCodexConfig(
         agent: AgentDefinition,
@@ -510,7 +602,7 @@ public enum AgentConfigWriter {
                     return rest.hasPrefix("=")
                 }
                 if isConflict {
-                    output.append("# \(line)   # superseded by the jxcode router block above")
+                    output.append("# \(line)   \(supersededMarker)")
                     commented += 1
                     continue
                 }
@@ -521,6 +613,36 @@ public enum AgentConfigWriter {
         if commented > 0 {
             notes.append("commented out \(commented) conflicting top-level key(s) — restore them to stop using the router")
         }
+        return output.joined(separator: "\n")
+    }
+
+    /// Undo `commentOutConflictingTopLevelKeys`.
+    ///
+    /// Commenting a user's own `model = …` out is necessary — TOML forbids the
+    /// duplicate key, so leaving it would make the whole file invalid — but it
+    /// is only half a contract. `revert` removed our block and left the line
+    /// commented, so a bind→unbind cycle permanently switched off the user's own
+    /// Codex model and Codex silently fell back to its default provider. The
+    /// README promised the line was preserved; this is the half that makes that
+    /// true.
+    ///
+    /// Only lines the writer produced are matched, which is what the shared
+    /// marker buys: a line the user had commented out themselves is skipped on
+    /// the way in, so it never carries the marker and is never uncommented here.
+    static func restoreCommentedOutTopLevelKeys(in text: String) -> String {
+        let suffix = "   " + supersededMarker
+        var output: [String] = []
+
+        for line in text.components(separatedBy: "\n") {
+            guard line.hasPrefix("# "), line.hasSuffix(suffix) else {
+                output.append(line)
+                continue
+            }
+            // `# ` in front, the marker behind: what is left is the line as the
+            // user wrote it, indentation and all.
+            output.append(String(line.dropFirst(2).dropLast(suffix.count)))
+        }
+
         return output.joined(separator: "\n")
     }
 
@@ -561,6 +683,23 @@ public enum AgentConfigWriter {
     private static func readJSONObject(_ file: URL) -> [String: Any]? {
         guard let data = try? Data(contentsOf: file) else { return nil }
         return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+
+    /// The values the managed keys held before JXCode first wrote to this file.
+    ///
+    /// Empty when there is no backup, which is also the record that we created
+    /// the file: every managed key in it is one we added, so removing them is
+    /// the right undo. When a backup does exist it is the pre-JXCode file, and
+    /// the keys we own are restored from it while every other key in the live
+    /// file is left as the user last had it — so a `MY_OWN_VAR` added while
+    /// bound survives the unbind.
+    private static func originalManagedEnvironment(for file: URL) -> [String: Any] {
+        let backup = file.appendingPathExtension("jxcode-backup")
+        guard let root = readJSONObject(backup),
+              let environment = root["env"] as? [String: Any]
+        else { return [:] }
+
+        return environment.filter { claudeEnvironmentKeys.contains($0.key) }
     }
 
     private static func writeJSONObject(_ object: [String: Any], to file: URL) throws {

@@ -146,7 +146,7 @@ struct ModelsPane: View {
     }
 
     private var agentsDetail: String {
-        let bound = state.bindReports.filter { $0.action != .notApplicable }
+        let bound = state.bindReports.filter(\.isRouted)
         guard !bound.isEmpty else { return "none pointed at the router" }
         return bound.map(\.agentName).joined(separator: ", ")
     }

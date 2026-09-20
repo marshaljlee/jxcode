@@ -1598,8 +1598,12 @@ final class AppState: ObservableObject {
     }
 
     /// How many agents are actually pointed at the router.
+    ///
+    /// `isRouted`, not "anything but `.notApplicable`": a refused bind wrote
+    /// nothing, so the agent still points wherever it did before and counting it
+    /// here would claim a routing that never happened.
     var boundAgentCount: Int {
-        bindReports.filter { $0.action != .notApplicable }.count
+        bindReports.filter(\.isRouted).count
     }
 
     // MARK: - Git state

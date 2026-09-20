@@ -552,7 +552,185 @@ final class AgentConfigWriterTests: XCTestCase {
         }
         XCTAssertGreaterThan(checked, 0, "expected at least one file to have been written")
     }
+
+    // MARK: - The bind/unbind contract
+    //
+    // Unbinding has to give the file back, not merely stop using it. Three ways
+    // it did not: a commented-out Codex key was never uncommented, a real
+    // `ANTHROPIC_API_KEY` was deleted rather than restored, and an unparseable
+    // `settings.json` was replaced wholesale. Each of these is silent — the
+    // agent starts, and simply behaves differently from before.
+
+    /// A real `ANTHROPIC_API_KEY` the user had comes back on unbind.
+    ///
+    /// Bind *has* to overwrite it with an empty string: a real key left in place
+    /// sends Claude Code to api.anthropic.com and bypasses the router this whole
+    /// feature exists to provide. But revert then removed the key, so unbinding
+    /// destroyed the one value the sandbox was meant to protect. It has to be
+    /// restored from the backup instead.
+    func testRevertRestoresAPreexistingClaudeAPIKey() throws {
+        try FileManager.default.createDirectory(at: paths.claudeConfig, withIntermediateDirectories: true)
+        let file = paths.claudeConfig.appendingPathComponent("settings.json")
+        try #"{"env":{"ANTHROPIC_API_KEY":"sk-ant-real","MY_OWN_VAR":"keep-me"}}"#
+            .write(to: file, atomically: true, encoding: .utf8)
+
+        _ = try AgentConfigWriter.apply(
+            agents: AgentRegistry.builtIns, paths: paths, routerURL: routerURL, model: "m"
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(try claudeSettings()["env"] as? [String: String])["ANTHROPIC_API_KEY"], "",
+            "while bound the key must be blank, or Claude Code bypasses the router"
+        )
+
+        _ = try AgentConfigWriter.revert(agents: AgentRegistry.builtIns, paths: paths)
+
+        let environment = try XCTUnwrap(try claudeSettings()["env"] as? [String: String])
+        XCTAssertEqual(environment["ANTHROPIC_API_KEY"], "sk-ant-real",
+                       "unbinding must give the user their key back")
+        XCTAssertEqual(environment["MY_OWN_VAR"], "keep-me")
+        XCTAssertNil(environment["ANTHROPIC_BASE_URL"])
+    }
+
+    /// The other half of the same rule: a key the *user* never had is ours, so
+    /// removing it is the right undo — restoring from the backup must not turn
+    /// into "leave every key we ever wrote behind".
+    func testRevertRemovesManagedKeysTheUserNeverHad() throws {
+        try FileManager.default.createDirectory(at: paths.claudeConfig, withIntermediateDirectories: true)
+        let file = paths.claudeConfig.appendingPathComponent("settings.json")
+        try #"{"env":{"MY_OWN_VAR":"keep-me"}}"#.write(to: file, atomically: true, encoding: .utf8)
+
+        _ = try AgentConfigWriter.apply(
+            agents: AgentRegistry.builtIns, paths: paths, routerURL: routerURL, model: "m"
+        )
+        _ = try AgentConfigWriter.revert(agents: AgentRegistry.builtIns, paths: paths)
+
+        let environment = try XCTUnwrap(try claudeSettings()["env"] as? [String: String])
+        XCTAssertEqual(environment["MY_OWN_VAR"], "keep-me")
+        for key in AgentConfigWriter.claudeEnvironmentKeys {
+            XCTAssertNil(environment[key], "\(key) was ours and the user never had it")
+        }
+    }
+
+    /// A `settings.json` we cannot parse is one we must not rewrite.
+    ///
+    /// The fallback used to be `?? [:]`, so a file carrying a comment — legal in
+    /// JSONC, which is what people write by hand, and a hard parse failure for
+    /// `JSONSerialization` — got the whole file replaced by an object holding
+    /// only our keys. A backup existed; the live file did not.
+    ///
+    /// A *trailing comma* is deliberately not the fixture: `JSONSerialization`
+    /// on macOS accepts one, so it would exercise nothing. `//` it rejects.
+    func testUnparseableClaudeSettingsAreRefusedNotReplaced() throws {
+        try FileManager.default.createDirectory(at: paths.claudeConfig, withIntermediateDirectories: true)
+        let file = paths.claudeConfig.appendingPathComponent("settings.json")
+        let original = "{\n  // keep this in sync with the team wiki\n"
+            + "  \"permissions\": { \"allow\": [\"Bash(ls:*)\"] }\n}\n"
+        try original.write(to: file, atomically: true, encoding: .utf8)
+
+        let reports = try AgentConfigWriter.apply(
+            agents: AgentRegistry.builtIns, paths: paths, routerURL: routerURL, model: "m"
+        )
+
+        XCTAssertEqual(reports.first { $0.agentID == "claude" }?.action, .refused)
+        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), original,
+                       "the file must be left exactly as it was")
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: file.appendingPathExtension("jxcode-backup").path),
+            "a refusal must leave no trace, including a backup of a file we never touched"
+        )
+    }
+
+    /// Valid JSON that is not an object is the same hazard by a different route:
+    /// `as? [String: Any]` fails, and the old code would have written over it.
+    func testClaudeSettingsThatAreNotAnObjectAreRefused() throws {
+        try FileManager.default.createDirectory(at: paths.claudeConfig, withIntermediateDirectories: true)
+        let file = paths.claudeConfig.appendingPathComponent("settings.json")
+        let original = #"["not","an","object"]"#
+        try original.write(to: file, atomically: true, encoding: .utf8)
+
+        let reports = try AgentConfigWriter.apply(
+            agents: AgentRegistry.builtIns, paths: paths, routerURL: routerURL, model: "m"
+        )
+
+        XCTAssertEqual(reports.first { $0.agentID == "claude" }?.action, .refused)
+        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), original)
+    }
+
+    /// An empty file is not an unparseable one. Treating it as a refusal would
+    /// leave Claude Code unrouted for no reason at all.
+    func testAnEmptyClaudeSettingsFileIsStillConfigured() throws {
+        try FileManager.default.createDirectory(at: paths.claudeConfig, withIntermediateDirectories: true)
+        let file = paths.claudeConfig.appendingPathComponent("settings.json")
+        try "".write(to: file, atomically: true, encoding: .utf8)
+
+        let reports = try AgentConfigWriter.apply(
+            agents: AgentRegistry.builtIns, paths: paths, routerURL: routerURL, model: "m"
+        )
+
+        XCTAssertEqual(reports.first { $0.agentID == "claude" }?.action, .merged)
+        XCTAssertEqual(try XCTUnwrap(try claudeSettings()["env"] as? [String: String])["ANTHROPIC_BASE_URL"],
+                       routerURL)
+    }
+
+    /// Unbinding gives the user their own Codex model setting back, live.
+    ///
+    /// The writer has to comment a conflicting top-level key out, because TOML
+    /// forbids the duplicate. It only did half the job: revert removed our block
+    /// and left the line commented, so a bind→unbind cycle permanently disabled
+    /// the user's setting and Codex silently fell back to its default provider.
+    func testUnbindingRestoresCommentedOutCodexKeys() throws {
+        try FileManager.default.createDirectory(at: paths.codexHome, withIntermediateDirectories: true)
+        let file = paths.codexHome.appendingPathComponent("config.toml")
+        let original = "model = \"gpt-5\"\nmodel_provider = \"openai\"\napproval_policy = \"on-request\"\n"
+        try original.write(to: file, atomically: true, encoding: .utf8)
+
+        _ = try AgentConfigWriter.apply(
+            agents: AgentRegistry.builtIns, paths: paths, routerURL: routerURL, model: "local"
+        )
+        XCTAssertTrue(try codexConfig().contains(#"# model = "gpt-5""#),
+                      "while bound the user's key has to be commented out or the file is invalid TOML")
+
+        _ = try AgentConfigWriter.revert(agents: AgentRegistry.builtIns, paths: paths)
+
+        XCTAssertEqual(
+            try String(contentsOf: file, encoding: .utf8), original,
+            "unbinding must leave the user's own keys live again, and the file as it was"
+        )
+    }
+
+    /// The marker is the whole reason a user's own comment is safe: a line they
+    /// commented out themselves never carries it, so it is never uncommented.
+    func testRestoreLeavesTheUsersOwnCommentsAlone() {
+        let text = "# model = \"gpt-5\"\n# a note of my own\n"
+        XCTAssertEqual(AgentConfigWriter.restoreCommentedOutTopLevelKeys(in: text), text)
+    }
+
+    func testRestoreUncommentsExactlyWhatTheWriterCommented() {
+        let written = "# model = \"gpt-5\"   " + AgentConfigWriter.supersededMarker
+        XCTAssertEqual(
+            AgentConfigWriter.restoreCommentedOutTopLevelKeys(in: written),
+            #"model = "gpt-5""#
+        )
+    }
+
+    /// A refusal wrote nothing, so it must not be counted as routed — the header
+    /// would otherwise claim an agent is on the router while its config still
+    /// names Anthropic's API.
+    func testARefusedReportIsNotCountedAsRouted() {
+        func report(_ action: AgentConfigWriter.Report.Action) -> AgentConfigWriter.Report {
+            AgentConfigWriter.Report(
+                agentID: "claude", agentName: "Claude Code", action: action, path: nil, notes: []
+            )
+        }
+        XCTAssertTrue(report(.created).isRouted)
+        XCTAssertTrue(report(.merged).isRouted)
+        XCTAssertTrue(report(.unchanged).isRouted)
+        XCTAssertTrue(report(.environmentOnly).isRouted)
+        XCTAssertFalse(report(.refused).isRouted)
+        XCTAssertFalse(report(.notApplicable).isRouted)
+    }
 }
+
 
 // MARK: - Model name shown to Claude Code
 

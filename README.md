@@ -673,9 +673,10 @@ Four rules it follows:
 
 Codex needs care: TOML forbids duplicate keys rather than letting the last one
 win, so a user's own top-level `model = …` would make the whole file invalid.
-The writer comments such lines out (preserving them) rather than deleting them,
-and only for keys before the first `[table]` header — a `model =` inside a
-section belongs to that section and is left alone.
+The writer comments such lines out rather than deleting them, and only for keys
+before the first `[table]` header — a `model =` inside a section belongs to that
+section and is left alone. Unbinding puts them back, so a bind→unbind cycle
+leaves the user's own setting live rather than silently disabled.
 
 ---
 
