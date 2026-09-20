@@ -1245,8 +1245,15 @@ public final class ModelRouter: @unchecked Sendable {
                         await keepAlive.stop()
                     }
                 } else if pending.count >= 8192 {
-                    sink.send(String(decoding: pending, as: UTF8.self))
-                    pending.removeAll(keepingCapacity: true)
+                    // Volume flush, for an upstream that never sends the blank
+                    // line. The cut has to land between scalars: decoding a
+                    // severed one yields U+FFFD now, and again for the bytes
+                    // that would have completed it, by which point they are
+                    // gone. See `utf8ScalarPrefixLength`.
+                    let safe = pending.utf8ScalarPrefixLength
+                    guard safe > 0 else { continue }
+                    sink.send(String(decoding: pending.prefix(safe), as: UTF8.self))
+                    pending.removeFirst(safe)
                 }
             }
             if !pending.isEmpty {
@@ -1329,9 +1336,18 @@ public final class ModelRouter: @unchecked Sendable {
                 pending.append(byte)
                 // Feed on newlines for latency, and on volume so a server that
                 // never sends a newline cannot stall the buffer indefinitely.
-                if byte == 0x0A || pending.count >= 1024 {
+                // A newline is always a safe cut — every byte of a multi-byte
+                // scalar is 0x80 or greater, and 0x0A is not — but a cut at a
+                // byte *count* is not, so that one takes whole scalars only.
+                if byte == 0x0A {
                     let text = String(decoding: pending, as: UTF8.self)
                     pending.removeAll(keepingCapacity: true)
+                    for event in parser.feed(text) { ingest(event) }
+                } else if pending.count >= 1024 {
+                    let safe = pending.utf8ScalarPrefixLength
+                    guard safe > 0 else { continue }
+                    let text = String(decoding: pending.prefix(safe), as: UTF8.self)
+                    pending.removeFirst(safe)
                     for event in parser.feed(text) { ingest(event) }
                 }
             }
@@ -1382,9 +1398,16 @@ public final class ModelRouter: @unchecked Sendable {
             var pending = Data()
             for try await byte in bytes {
                 pending.append(byte)
-                if pending.suffix(2) == Data("\n\n".utf8) || pending.count >= 8192 {
+                if pending.suffix(2) == Data("\n\n".utf8) {
                     sink.send(String(decoding: pending, as: UTF8.self))
                     pending.removeAll(keepingCapacity: true)
+                } else if pending.count >= 8192 {
+                    // The blank line above is a safe cut; this one is a count,
+                    // so it has to land between scalars.
+                    let safe = pending.utf8ScalarPrefixLength
+                    guard safe > 0 else { continue }
+                    sink.send(String(decoding: pending.prefix(safe), as: UTF8.self))
+                    pending.removeFirst(safe)
                 }
             }
             if !pending.isEmpty { sink.send(String(decoding: pending, as: UTF8.self)) }

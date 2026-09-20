@@ -52,6 +52,14 @@ final class FakeUpstream: @unchecked Sendable {
     /// When set, every completion is streamed.
     var alwaysStream = false
 
+    /// Complete SSE frames, emitted verbatim.
+    ///
+    /// `streamPayloads` wraps each entry as an OpenAI `data:` line, which cannot
+    /// express an Anthropic event — those need an `event:` line as well. Native
+    /// Anthropic passthrough is a real route, so the fake has to be able to
+    /// speak it.
+    var rawStreamFrames: [String]?
+
     private(set) var port: UInt16 = 0
 
     init() throws {
@@ -136,7 +144,11 @@ final class FakeUpstream: @unchecked Sendable {
         // A native Anthropic upstream answers in Anthropic's shape. Keyed off the
         // path because that is exactly what the router keys off.
         if request.path.hasSuffix("/v1/messages") {
-            send(connection, json: anthropicCompletionBody)
+            if alwaysStream || rawStreamFrames != nil {
+                sendStream(connection)
+            } else {
+                send(connection, json: anthropicCompletionBody)
+            }
             return
         }
 
@@ -170,17 +182,21 @@ final class FakeUpstream: @unchecked Sendable {
         head += "Connection: close\r\n\r\n"
 
         var payload = Data(head.utf8)
-        for item in streamPayloads {
-            let frame = "data: \(item)\r\n\r\n"
+        // `[DONE]` is OpenAI's terminator. An Anthropic stream ends with
+        // `message_stop`, so raw frames are emitted exactly as given and bring
+        // their own ending.
+        let frames: [String]
+        if let raw = rawStreamFrames {
+            frames = raw
+        } else {
+            frames = streamPayloads.map { "data: \($0)\r\n\r\n" } + ["data: [DONE]\r\n\r\n"]
+        }
+        for frame in frames {
             let bytes = Data(frame.utf8)
             payload.append(Data("\(String(bytes.count, radix: 16))\r\n".utf8))
             payload.append(bytes)
             payload.append(Data("\r\n".utf8))
         }
-        let done = Data("data: [DONE]\r\n\r\n".utf8)
-        payload.append(Data("\(String(done.count, radix: 16))\r\n".utf8))
-        payload.append(done)
-        payload.append(Data("\r\n".utf8))
         payload.append(Data("0\r\n\r\n".utf8))
 
         connection.send(content: payload, completion: .contentProcessed { _ in
@@ -376,6 +392,82 @@ final class RouterEndToEndTests: XCTestCase {
         XCTAssertTrue(transcript.contains("Hel"))
         XCTAssertTrue(transcript.contains("lo"))
         XCTAssertTrue(transcript.contains(#""stop_reason":"end_turn""#))
+    }
+
+    /// A flush driven by a byte *count* rather than by a newline can cut a
+    /// multi-byte scalar in half, and `String(decoding:as: UTF8.self)` turns
+    /// each half into U+FFFD. `translateOpenAIStream` flushes at 1024 bytes, so
+    /// the payload is built to place a four-byte emoji across that offset on
+    /// the wire: three of its bytes land in the flushed chunk, one in the next.
+    func testAMultiByteScalarStraddlingTheFlushBoundarySurvives() async throws {
+        let harness = try RouterHarness()
+
+        // `data: ` plus the JSON up to the content value — exactly what the
+        // fake puts on the wire before the content begins.
+        let wirePrefix = #"data: {"id":"c","choices":[{"index":0,"delta":{"content":""#
+        let emojiStart = 1021
+        let padding = String(repeating: "a", count: emojiStart - wirePrefix.utf8.count)
+        let content = padding + "🙂" + " done"
+
+        harness.upstream.streamPayloads = [
+            #"{"id":"c","choices":[{"index":0,"delta":{"content":"\#(content)"}}]}"#,
+            #"{"id":"c","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"#,
+        ]
+
+        let transcript = try await harness.streamPost("/v1/messages", body: """
+        {"model":"claude-sonnet-4-5","max_tokens":256,"stream":true,
+         "messages":[{"role":"user","content":"say hello"}]}
+        """)
+
+        XCTAssertFalse(transcript.contains("\u{FFFD}"), "a scalar was cut in half")
+        XCTAssertTrue(transcript.contains("🙂"), "the character did not arrive")
+    }
+
+    /// The same hazard on the raw passthrough route (`/v1/chat/completions`
+    /// against an OpenAI-compatible upstream), which flushes at 8192 bytes.
+    func testAMultiByteScalarStraddlingTheRawPassthroughBoundarySurvives() async throws {
+        let harness = try RouterHarness()
+
+        let wirePrefix = #"data: {"id":"c","choices":[{"index":0,"delta":{"content":""#
+        let emojiStart = 8189          // flush fires at 8192, three bytes in
+        let padding = String(repeating: "a", count: emojiStart - wirePrefix.utf8.count)
+        let content = padding + "\u{1F642}" + " done"
+
+        harness.upstream.streamPayloads = [
+            #"{"id":"c","choices":[{"index":0,"delta":{"content":"\#(content)"}}]}"#,
+        ]
+
+        let transcript = try await harness.streamPost("/v1/chat/completions", body: """
+        {"model":"fake-model","max_tokens":256,"stream":true,
+         "messages":[{"role":"user","content":"say hello"}]}
+        """)
+
+        XCTAssertFalse(transcript.contains("\u{FFFD}"), "a scalar was cut in half")
+        XCTAssertTrue(transcript.contains("\u{1F642}"), "the character did not arrive")
+    }
+
+    /// And on Anthropic passthrough — a native Anthropic upstream, where the
+    /// frames carry an `event:` line and the volume threshold is also 8192.
+    func testAMultiByteScalarStraddlingTheAnthropicPassthroughBoundarySurvives() async throws {
+        let harness = try RouterHarness(kind: .anthropic)
+
+        let wirePrefix = "event: content_block_delta\n"
+            + #"data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":""#
+        let emojiStart = 8189
+        let padding = String(repeating: "a", count: emojiStart - wirePrefix.utf8.count)
+        let content = padding + "\u{1F642}" + " done"
+
+        harness.upstream.rawStreamFrames = [
+            wirePrefix + content + "\"}}\n\n",
+        ]
+
+        let transcript = try await harness.streamPost("/v1/messages", body: """
+        {"model":"claude-sonnet-4-5","max_tokens":256,"stream":true,
+         "messages":[{"role":"user","content":"say hello"}]}
+        """)
+
+        XCTAssertFalse(transcript.contains("\u{FFFD}"), "a scalar was cut in half")
+        XCTAssertTrue(transcript.contains("\u{1F642}"), "the character did not arrive")
     }
 
     func testStreamingCarriesTheUpstreamUsageCounts() async throws {
