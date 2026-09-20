@@ -1,0 +1,6 @@
+# Termux packages the bundled runtime is built from.
+# One package per line; dependencies are resolved transitively by
+# fetch-termux.py. Edit this list, then run `./build-runtime.sh clean`.
+nodejs
+npm
+curl

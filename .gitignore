@@ -1,0 +1,53 @@
+# ---------------------------------------------------------------------------
+# JXCode
+# ---------------------------------------------------------------------------
+
+# --- macOS ---
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# --- Swift Package Manager ---
+.build/
+.swiftpm/
+*.xcodeproj
+*.profraw
+default.profraw
+
+# --- Gradle / Android build output ---
+android/.gradle/
+android/.kotlin/
+android/.cxx/
+android/build/
+android/app/build/
+android/local.properties
+
+# --- Native dependencies fetched by the scripts in android/native ---
+#   fetch-llama.sh  -> clones llama.cpp (an upstream repo with its own .git)
+#   fetch-termux.py -> unpacks the Termux debs into node-deb/
+#   bundle-runtime.py -> assembles runtime/
+# These are reproducible from those scripts and total ~640 MB, so they are not
+# tracked. Run the scripts to materialise them after cloning.
+android/native/llama.cpp/
+android/native/node-deb/
+android/native/runtime/
+android/native/build/
+
+# --- Native libraries built by android/native into the app source set ---
+android/app/src/main/jniLibs/
+
+# --- Prebuilt APK over GitHub's 100 MiB hard per-file limit ---
+# The release APK and its signature are committed; the debug APK is 101.5 MiB
+# and GitHub rejects it outright. Rebuild with android/build.sh if you need it.
+android/dist/jxcode-arm64-v8a-debug.apk
+
+# --- Agent runtime state that leaks into the repo root ---
+# Appears when a sandboxed agent is pointed at the repo itself. Contains
+# .claude.json (machineID / userID) and session transcripts. Never commit.
+config/
+
+# --- Agent scratch space and memory ---
+# Local working notes, screenshots and build captures. Kept on disk, but it is
+# not part of the project and is not published.
+.workbuddy-ai/

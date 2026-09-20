@@ -1,0 +1,13 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- A terminal prompt: caret plus cursor block, matching the app's mark. -->
+    <path
+        android:fillColor="#4EC9B0"
+        android:pathData="M30,36 L48,54 L30,72 L36,78 L60,54 L36,30 Z" />
+    <path
+        android:fillColor="#E6EDF3"
+        android:pathData="M66,72 H84 V78 H66 Z" />
+</vector>
