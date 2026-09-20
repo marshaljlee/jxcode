@@ -398,8 +398,12 @@ public final class ModelRouter: @unchecked Sendable {
                         return
                     }
                 } catch {
+                    // A parse failure carries the status the peer should see;
+                    // an oversized body is 413, not 400, so the client can tell
+                    // "too big" from "not understood".
+                    let status = (error as? HTTPParseError)?.statusCode ?? 400
                     self.send(
-                        .apiError("\(error)", status: 400, anthropicStyle: false),
+                        .apiError("\(error)", status: status, anthropicStyle: false),
                         on: context.connection
                     )
                     return

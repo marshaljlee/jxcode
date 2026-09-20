@@ -41,6 +41,25 @@ public struct HTTPRequest: Sendable {
 public enum HTTPParseError: Error, CustomStringConvertible {
     case malformedHead
     case unsupportedTransferEncoding(String)
+    /// A `Content-Length` that is not a plain run of digits.
+    case invalidContentLength(String)
+    /// A `Content-Length` above what the parser will buffer.
+    case contentTooLarge(declared: Int, limit: Int)
+    /// Bytes with no blank line ending a head, past the head limit.
+    case headTooLarge(limit: Int)
+
+    /// The status to answer with.
+    ///
+    /// All of these are the peer's fault, so all are 4xx. The size ones are
+    /// 413 rather than 400 so that a client — an agent retrying a long prompt,
+    /// say — can tell "too big" from "not understood" and react differently
+    /// instead of retrying a request that can never succeed.
+    public var statusCode: Int {
+        switch self {
+        case .contentTooLarge, .headTooLarge: return 413
+        default: return 400
+        }
+    }
 
     public var description: String {
         switch self {
@@ -48,6 +67,12 @@ public enum HTTPParseError: Error, CustomStringConvertible {
             return "malformed request head"
         case .unsupportedTransferEncoding(let value):
             return "unsupported Transfer-Encoding: \(value)"
+        case .invalidContentLength(let value):
+            return "invalid Content-Length: \(value)"
+        case .contentTooLarge(let declared, let limit):
+            return "Content-Length \(declared) exceeds the \(limit)-byte limit"
+        case .headTooLarge(let limit):
+            return "request head exceeds the \(limit)-byte limit"
         }
     }
 }
@@ -70,11 +95,33 @@ public struct HTTPRequestParser {
     private static let crlfTerminator = Data("\r\n\r\n".utf8)
     private static let lfTerminator = Data("\n\n".utf8)
 
+    /// The largest `Content-Length` honoured: 32 MiB.
+    ///
+    /// A declared length is a claim, not a measurement. The bytes may dribble
+    /// in, or never arrive at all, and nothing else bounds how much is held
+    /// while waiting for them — so the bound has to be here.
+    public static let defaultMaxBodyBytes = 32 * 1024 * 1024
+
+    /// The largest head accepted: 64 KiB.
+    ///
+    /// Same reasoning, for a peer that sends bytes but never the blank line
+    /// that ends a head. Generous for real headers, which are kilobytes.
+    public static let defaultMaxHeadBytes = 64 * 1024
+
+    public let maxBodyBytes: Int
+    public let maxHeadBytes: Int
+
     private var buffer = Data()
     private var state: State = .head
     private var pendingHead: ParsedHead?
 
-    public init() {}
+    public init(
+        maxBodyBytes: Int = Self.defaultMaxBodyBytes,
+        maxHeadBytes: Int = Self.defaultMaxHeadBytes
+    ) {
+        self.maxBodyBytes = maxBodyBytes
+        self.maxHeadBytes = maxHeadBytes
+    }
 
     private struct ParsedHead {
         var method: String
@@ -91,7 +138,15 @@ public struct HTTPRequestParser {
     public mutating func nextRequest() throws -> HTTPRequest? {
         switch state {
         case .head:
-            guard let terminator = findHeadTerminator() else { return nil }
+            guard let terminator = findHeadTerminator() else {
+                // No blank line yet. The wait has to be bounded: a peer that
+                // keeps sending without ever ending a head would otherwise
+                // grow this buffer for as long as it cared to.
+                guard buffer.count <= maxHeadBytes else {
+                    throw HTTPParseError.headTooLarge(limit: maxHeadBytes)
+                }
+                return nil
+            }
             let headData = buffer.subdata(in: buffer.startIndex..<terminator.lowerBound)
             buffer.removeSubrange(buffer.startIndex..<terminator.upperBound)
 
@@ -104,8 +159,11 @@ public struct HTTPRequestParser {
                 throw HTTPParseError.unsupportedTransferEncoding(encoding)
             }
 
-            let length = Int(head.headers["content-length"] ?? "0") ?? 0
-            if length <= 0 {
+            let length = try contentLength(from: head.headers["content-length"])
+            if length > maxBodyBytes {
+                throw HTTPParseError.contentTooLarge(declared: length, limit: maxBodyBytes)
+            }
+            if length == 0 {
                 return HTTPRequest(
                     method: head.method,
                     path: head.path,
@@ -136,6 +194,27 @@ public struct HTTPRequestParser {
                 body: Data(body)
             )
         }
+    }
+
+    /// Read a `Content-Length` header.
+    ///
+    /// Strict, because this value decides how many bytes are taken as the body
+    /// and how many are left for the next request. Anything that is not a plain
+    /// run of ASCII digits — negative, signed, spaced, hexadecimal — is refused
+    /// rather than defaulted to zero: defaulting leaves the real body in the
+    /// buffer, where the next pass reads it as a request head.
+    private func contentLength(from raw: String?) throws -> Int {
+        guard let raw else { return 0 }
+        guard !raw.isEmpty, raw.allSatisfy({ $0.isASCII && $0.isNumber }) else {
+            throw HTTPParseError.invalidContentLength(raw)
+        }
+        // Digits, but more of them than an `Int` holds. Still a number, and
+        // still far over the limit, so it is reported as oversized rather than
+        // being allowed to overflow into something small.
+        guard let length = Int(raw) else {
+            throw HTTPParseError.contentTooLarge(declared: Int.max, limit: maxBodyBytes)
+        }
+        return length
     }
 
     /// Locate the end of the head, accepting either CRLF or bare LF.
