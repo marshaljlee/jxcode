@@ -1181,14 +1181,28 @@ final class AppState: ObservableObject {
         return modelScan?.models.first { $0.id == selectedModelID }
     }
 
-    /// Look for `llama-server`. Cheap, and safe to call whenever the pane opens.
-    func refreshRuntime() {
-        llamaRuntime = LlamaRuntimeLocator(paths: sandbox.paths).locate()
-    }
-
     /// Where the app looked, for the "not found" explanation.
-    var runtimeDiagnostics: [(path: URL, origin: LlamaRuntime.Origin, exists: Bool)] {
-        LlamaRuntimeLocator(paths: sandbox.paths).diagnostics()
+    ///
+    /// Stored, not computed. `diagnostics()` descends into bundled application
+    /// directories looking for a binary that usually is not there, and reading
+    /// it from a view's `body` ran that walk on the main actor on every single
+    /// evaluation — several times a second for as long as the pane was open.
+    @Published var runtimeDiagnostics: [(path: URL, origin: LlamaRuntime.Origin, exists: Bool)] = []
+
+    /// Look for `llama-server`, and record where the search looked.
+    ///
+    /// Both halves run off the main actor. The search is filesystem work rather
+    /// than a property read, and it is the same work the diagnostics need, so
+    /// it is done once here instead of once per view evaluation.
+    func refreshRuntime() async {
+        let paths = sandbox.paths
+        typealias Probe = (LlamaRuntime?, [(path: URL, origin: LlamaRuntime.Origin, exists: Bool)])
+        let probe: Probe = await Task.detached(priority: .utility) {
+            let locator = LlamaRuntimeLocator(paths: paths)
+            return (locator.locate(), locator.diagnostics())
+        }.value
+        llamaRuntime = probe.0
+        runtimeDiagnostics = probe.1
     }
 
     /// Scan the configured directories for GGUF models.
@@ -1300,7 +1314,7 @@ final class AppState: ObservableObject {
             return
         }
 
-        stopServing()
+        await stopServing()
 
         let slug = model.model.filename
             .replacingOccurrences(of: ".gguf", with: "")
@@ -1324,7 +1338,7 @@ final class AppState: ObservableObject {
         // Warned rather than acted on, but warned *before* the load: a Metal
         // allocation failure minutes into a multi-gigabyte load is the worst
         // possible moment to discover another server is holding the memory.
-        let conflicts = conflictingServers()
+        let conflicts = await conflictingServers()
         modelStatus = conflicts.isEmpty
             ? "Loading \(model.displayName)…"
             : "Loading \(model.displayName)… \(conflicts.count) other llama-server "
@@ -1359,9 +1373,25 @@ final class AppState: ObservableObject {
     }
 
     /// Stop the server and release its memory and port.
-    func stopServing() {
+    ///
+    /// Async, because the stop is not instant. `llama-server` unloads a
+    /// multi-gigabyte model on SIGTERM and the wait lasts as long as that
+    /// takes — up to ten seconds. On the main actor that was a frozen window
+    /// for precisely the period in which the user was waiting to be told the
+    /// stop had worked.
+    func stopServing() async {
         stopHealthPolling()
-        llamaServer?.stop()
+        let server = llamaServer
+        await Task.detached(priority: .userInitiated) { server?.stop() }.value
+        tearDownServing()
+    }
+
+    /// Forget the served model and everything recorded about it.
+    ///
+    /// Split out of `stopServing()` because quitting cannot call that: teardown
+    /// at exit has to finish on the thread that is already running, and this is
+    /// the half that is safe to do there.
+    private func tearDownServing() {
         llamaServer = nil
         servedModelID = nil
         servedPort = nil
@@ -1384,7 +1414,14 @@ final class AppState: ObservableObject {
     /// the Models pane, `TabItem.terminate()` only from `closeTab`, and
     /// `PTYSession.deinit` deliberately does not kill.
     func shutdown() {
-        stopServing()
+        stopHealthPolling()
+        // Synchronous, and on this thread, deliberately. `applicationWillTerminate`
+        // is called once and the process exits as soon as it returns, so a task
+        // started here would never run and the server would outlive the app.
+        // Blocking during quit is the correct trade; blocking while the window
+        // is on screen is not, which is why `stopServing()` is async.
+        llamaServer?.stop()
+        tearDownServing()
         for tab in tabs {
             tab.terminate()
         }
@@ -1462,30 +1499,12 @@ final class AppState: ObservableObject {
 
     /// Other `llama-server` processes already holding unified memory.
     ///
-    /// Apple Silicon shares memory between CPU and GPU, so a second model
-    /// alongside llama.app or Ollama usually fails with a Metal allocation
-    /// error that reads like a bug in this app. The reference implementations
-    /// terminate those processes outright; killing another application's
-    /// process on the user's behalf is hostile, so this reports them instead
-    /// and lets the user decide.
-    func conflictingServers(excluding pid: Int32 = 0) -> [String] {
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
-        task.arguments = ["-fl", "llama-server"]
-        let pipe = Pipe()
-        task.standardOutput = pipe
-        task.standardError = Pipe()
-        do { try task.run() } catch { return [] }
-        task.waitUntilExit()
-
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        guard let text = String(data: data, encoding: .utf8) else { return [] }
-
-        return text.split(separator: "\n").compactMap { line in
-            let parts = line.split(separator: " ", maxSplits: 1)
-            guard let first = parts.first, let found = Int32(first), found != pid else { return nil }
-            return String(parts.count > 1 ? parts[1] : line)
-        }
+    /// Why they are reported rather than terminated is spelled out in
+    /// `RunningServers`, next to the listing itself.
+    nonisolated func conflictingServers(excluding pid: Int32 = 0) async -> [String] {
+        await RunningServers.list()
+            .filter { $0.pid != pid }
+            .map(\.command)
     }
 
     /// Re-read the running server's own report, for the refresh button.
@@ -1875,11 +1894,15 @@ final class AppState: ObservableObject {
     @Published var isInstallingRuntime = false
     @Published var showBuildScript = false
 
-    func refreshInstallerPlan() {
-        runtimeInstallerPlan = LlamaRuntimeInstaller.plan(
-            paths: sandbox.paths,
-            hostRuntime: llamaRuntime
-        )
+    func refreshInstallerPlan() async {
+        let paths = sandbox.paths
+        let hostRuntime = llamaRuntime
+        // `plan` runs `otool` once per library the binary loads — a subprocess
+        // per dependency. Called from `onAppear`, those spawns ran on the main
+        // actor and held it for as long as they took.
+        runtimeInstallerPlan = await Task.detached(priority: .utility) {
+            LlamaRuntimeInstaller.plan(paths: paths, hostRuntime: hostRuntime)
+        }.value
     }
 
     /// Adopt the host runtime into the sandbox, so the app stops depending on
@@ -1896,10 +1919,12 @@ final class AppState: ObservableObject {
         Task.detached(priority: .userInitiated) {
             do {
                 let installed = try LlamaRuntimeInstaller.adopt(from: source, into: paths)
+                await MainActor.run { self.isInstallingRuntime = false }
+                // Awaited outside `MainActor.run`, whose closure cannot suspend,
+                // and sequentially: the plan reads the runtime this refresh finds.
+                await self.refreshRuntime()
+                await self.refreshInstallerPlan()
                 await MainActor.run {
-                    self.isInstallingRuntime = false
-                    self.refreshRuntime()
-                    self.refreshInstallerPlan()
                     self.modelStatus = "Runtime installed at \(installed.path)."
                 }
             } catch {

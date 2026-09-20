@@ -277,9 +277,20 @@ public final class LlamaServer: @unchecked Sendable {
     /// allocation in a state the next launch has to clean up, so it is given a
     /// chance to exit on its own first.
     public func stop(timeout: TimeInterval = 10) {
-        guard let process, process.isRunning else {
-            cleanup()
-            state = .stopped
+        // The process is captured under the queue and waited on outside it.
+        // The wait runs for as long as the model takes to unload — seconds —
+        // and holding the lock across it would stall every other reader,
+        // `isProcessAlive` most of all, which is what has to observe the exit.
+        let running = queue.sync { () -> Process? in
+            guard let process = self.process, process.isRunning else { return nil }
+            return process
+        }
+
+        guard let process = running else {
+            queue.sync {
+                cleanup()
+                state = .stopped
+            }
             return
         }
 
@@ -297,8 +308,10 @@ public final class LlamaServer: @unchecked Sendable {
             usleep(200_000)
         }
 
-        cleanup()
-        state = .stopped
+        queue.sync {
+            cleanup()
+            state = .stopped
+        }
     }
 
     private func cleanup() {

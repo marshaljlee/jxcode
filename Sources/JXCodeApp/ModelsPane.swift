@@ -100,7 +100,7 @@ struct ModelsPane: View {
 
                     if state.isServing {
                         Button {
-                            state.stopServing()
+                            Task { await state.stopServing() }
                         } label: {
                             Label {
                                 Text("Stop")
@@ -282,7 +282,7 @@ struct ModelsPane: View {
                     Spacer()
                 }
             } else {
-                Button("Check what is available") { state.refreshInstallerPlan() }
+                Button("Check what is available") { Task { await state.refreshInstallerPlan() } }
                     .controlSize(.small)
             }
         }
@@ -691,7 +691,7 @@ struct ModelsPane: View {
         HStack(spacing: 10) {
             if isServingThis {
                 Button {
-                    state.stopServing()
+                    Task { await state.stopServing() }
                 } label: {
                     Label {
                         Text("Stop")
@@ -782,9 +782,13 @@ struct ModelsSheet: View {
         .frame(minWidth: 700, idealWidth: 760, minHeight: 600, idealHeight: 720)
         .background(Theme.surfaceDeepest)
         .onAppear {
-            state.refreshRuntime()
-            state.refreshInstallerPlan()
-            if state.modelScan == nil { state.scanModels() }
+            // Awaited in order, not in parallel: the installer plan reads the
+            // runtime that `refreshRuntime()` is what finds.
+            Task {
+                await state.refreshRuntime()
+                await state.refreshInstallerPlan()
+                if state.modelScan == nil { state.scanModels() }
+            }
         }
         .sheet(isPresented: $state.showBuildScript) {
             BuildScriptSheet(state: state)
