@@ -1376,6 +1376,21 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Tear down everything that would otherwise outlive the process.
+    ///
+    /// Called on the way out of the app. Without it, closing the window exited
+    /// with the served model still holding its memory and its port, and with
+    /// every agent's pty still running: `stopServing()` was reachable only from
+    /// the Models pane, `TabItem.terminate()` only from `closeTab`, and
+    /// `PTYSession.deinit` deliberately does not kill.
+    func shutdown() {
+        stopServing()
+        for tab in tabs {
+            tab.terminate()
+        }
+        tabs.removeAll()
+    }
+
     // MARK: - Is it still running?
 
     /// How often the running server is asked whether it is still there.

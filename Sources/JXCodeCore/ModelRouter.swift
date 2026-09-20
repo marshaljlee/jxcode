@@ -648,8 +648,66 @@ public final class ModelRouter: @unchecked Sendable {
         }
     }
 
+    /// Why this request cannot have come from a local client, or `nil` if it can.
+    ///
+    /// The listener is bound to 127.0.0.1, which stops a remote host reaching it
+    /// but does nothing about a page the user already has open. A browser will
+    /// POST to `http://127.0.0.1:5255` from any origin it likes, and because a
+    /// `no-cors` fetch is a *simple* request it is sent with no preflight — so
+    /// the router sees a well-formed request and spends the user's credits. The
+    /// attacker cannot read the reply that way, but DNS rebinding removes even
+    /// that limit, and once a name has been rebound the `Host` header is the
+    /// only thing left that distinguishes it from `localhost`.
+    ///
+    /// So both are checked. No local client sets an `Origin`, which makes its
+    /// presence on its own sufficient grounds for refusal; and `Host` must name
+    /// the loopback interface or this machine.
+    private func nonLocalRequestRejection(_ request: HTTPRequest) -> String? {
+        if let origin = request.header("origin"), !origin.isEmpty {
+            return "cross-origin request rejected"
+        }
+
+        guard let host = request.header("host")?.trimmingCharacters(in: .whitespaces),
+              !host.isEmpty else {
+            return "request rejected: missing Host header"
+        }
+
+        // Strip the port, and the brackets around an IPv6 literal.
+        var name = host
+        if name.hasPrefix("[") {
+            guard let close = name.firstIndex(of: "]") else {
+                return "request rejected: malformed Host"
+            }
+            name = String(name[name.index(after: name.startIndex)..<close])
+        } else if let colon = name.lastIndex(of: ":") {
+            name = String(name[name.startIndex..<colon])
+        }
+        name = name.lowercased()
+
+        // This machine's own names are legitimate — an agent pointed at
+        // `http://<host>.local:5255` still resolves to the loopback listener.
+        // A rebinding attacker's domain matches none of these.
+        let machine = ProcessInfo.processInfo.hostName.lowercased()
+        let allowed: Set<String> = [
+            "127.0.0.1", "localhost", "::1", machine,
+            machine.hasSuffix(".local") ? machine : machine + ".local",
+        ]
+        guard allowed.contains(name) else {
+            return "request rejected: Host \(host) is not loopback"
+        }
+        return nil
+    }
+
     private func route(_ request: HTTPRequest) async throws -> RouteOutcome {
         let configuration = state.current
+
+        // Ahead of everything, including the liveness probes below. Those are
+        // unauthenticated by design, so the origin check is the only thing
+        // standing in front of them, and it costs nothing to do it first.
+        if let rejection = nonLocalRequestRejection(request) {
+            log.write("403 \(request.method) \(request.path) — \(rejection)")
+            return .respond(.apiError(rejection, status: 403, anthropicStyle: true))
+        }
 
         switch (request.method, request.path) {
         // Deliberately unauthenticated, and deliberately first: the app polls
@@ -716,6 +774,16 @@ public final class ModelRouter: @unchecked Sendable {
     // MARK: Introspection endpoints
 
     private func healthPayload(_ configuration: RouterConfiguration) -> JSONValue {
+        // The provider and model are reported on purpose — the field set is
+        // pinned by `RouterEndToEndTests.testHealthReportsTheSelectedProviderAndModel`,
+        // so trimming it would be a silent behaviour change, not a fix.
+        //
+        // It is only safe to report them because `nonLocalRequestRejection`
+        // runs first. This endpoint is unauthenticated by design, so the app can
+        // poll it before a token is loaded; without the origin gate,
+        // "unauthenticated" also meant "reachable from any page the user has
+        // open", which is what made this worth reviewing. A local process can
+        // still read it, but a local process can read the config files directly.
         var object: [String: JSONValue] = [
             "status": .string(configuration.isReady ? "ok" : "unconfigured"),
             "port": .number(Double(port)),

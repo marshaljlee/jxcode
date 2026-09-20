@@ -257,18 +257,37 @@ func cmdServe(sandbox: Sandbox, flags: Flags) throws {
     print("")
     print("Press Ctrl-C to stop.")
 
-    // Stop the child on the way out. An orphaned llama-server holding several
-    // gigabytes and a port is exactly the outcome this class exists to prevent,
-    // so the handler stops it explicitly rather than relying on the deinit.
-    signal(SIGINT) { _ in
-        FileHandle.standardError.write(Data("\nstopping…\n".utf8))
-        exit(0)
-    }
+    // A signal handler may only touch async-signal-safe state, so it records
+    // the request and does nothing else; the loop below performs the stop.
+    //
+    // This used to call `exit(0)` directly, which was worse than doing nothing:
+    // `exit` terminates the process without running any `deinit`, so the child
+    // was never signalled and the handler's stated purpose — not leaving an
+    // orphan holding several gigabytes and a port — was exactly what it caused.
+    signal(SIGINT, handleServeSignal)
+    signal(SIGTERM, handleServeSignal)
 
-    while server.state.isRunning {
+    while server.state.isRunning && serveInterruptRequested == 0 {
         sleep(1)
     }
 
-    print("llama-server stopped: \(server.state)")
+    if serveInterruptRequested != 0 {
+        print("")
+        print("stopping…")
+    }
+
+    // Stopped before the state is printed, so the line reports what happened
+    // rather than what was true a moment earlier.
     server.stop()
+    print("llama-server stopped: \(server.state)")
+}
+
+/// Set by the SIGINT/SIGTERM handler, read by the wait loop in `cmdServe`.
+///
+/// `sig_atomic_t` is the one type a signal handler is permitted to write, and
+/// the handler does nothing else with it.
+private var serveInterruptRequested: sig_atomic_t = 0
+
+private func handleServeSignal(_ signalNumber: Int32) {
+    serveInterruptRequested = 1
 }

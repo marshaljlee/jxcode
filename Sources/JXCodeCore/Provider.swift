@@ -229,11 +229,25 @@ public final class ProviderStore {
     }
 
     public func save() throws {
-        try FileManager.default.createDirectory(at: paths.state, withIntermediateDirectories: true)
+        // `providers.json` carries the API keys. The directory is created
+        // private and the file mode set explicitly rather than inherited from
+        // the umask, which on a default macOS account is 022 — leaving a file
+        // full of credentials readable by every user on the machine.
+        try FileManager.default.createDirectory(
+            at: paths.state,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
         try encoder.encode(providers).write(to: paths.providersFile, options: .atomic)
+        // After the write, because `.atomic` writes a temporary file and renames
+        // it into place — the mode has to be set on the file that survives.
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: paths.providersFile.path
+        )
     }
 
     public func add(_ provider: Provider) throws {

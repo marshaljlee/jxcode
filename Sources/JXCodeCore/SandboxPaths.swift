@@ -245,11 +245,26 @@ public struct SandboxPaths: Sendable, Equatable {
     }
 
     /// Create the whole tree. Idempotent.
+    ///
+    /// Every directory is created `0o700`. The sandbox's entire claim is that it
+    /// is private, and `createDirectory` without attributes inherits the umask —
+    /// `0o755` on a default account — which leaves `env/home` readable by every
+    /// local user. That directory holds `settings.json` with the agent's auth
+    /// token, `.claude.json`, connector env tokens and `.gitconfig`.
     @discardableResult
     public func createDirectories() throws -> [URL] {
         let fm = FileManager.default
         for dir in requiredDirectories {
-            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            try fm.createDirectory(
+                at: dir,
+                withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o700]
+            )
+            // `attributes` apply only to directories this call actually creates;
+            // an existing tree keeps whatever mode it already had. Re-asserting
+            // the mode on every pass is therefore both idempotent and a repair
+            // for a sandbox created by an earlier version.
+            try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path)
         }
         return requiredDirectories
     }

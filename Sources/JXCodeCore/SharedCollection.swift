@@ -23,6 +23,24 @@ public enum Identifier {
             .joined(separator: "-")
         return collapsed.isEmpty ? fallback : collapsed
     }
+
+    /// Whether `id` is safe to use as a single path component.
+    ///
+    /// Every id in the shared collection ends up as a directory name or a file
+    /// name, and `URL.appendingPathComponent` does **not** strip `..` — the
+    /// filesystem resolves it. An id of `../../../../tmp/x` therefore escapes
+    /// the collection directory entirely, which is an arbitrary write and an
+    /// arbitrary delete.
+    ///
+    /// The gate is the slug rule itself: an id is safe only if it is already
+    /// exactly what `slug` would produce from it, so it can contain nothing but
+    /// letters, digits and interior hyphens. `..` slugs to the empty fallback,
+    /// and anything containing a separator slugs to something different, so
+    /// both are refused without needing a special case for either.
+    public static func isSafePathComponent(_ id: String) -> Bool {
+        guard !id.isEmpty, id.count <= 128 else { return false }
+        return slug(id, fallback: "") == id
+    }
 }
 
 // MARK: - Skills
@@ -473,6 +491,23 @@ public struct Automation: Codable, Identifiable, Hashable, Sendable {
     }
 }
 
+/// Thrown when an id cannot be used as a path component.
+///
+/// Separate from the JSON write errors because it is a *refusal* rather than a
+/// failure: nothing was attempted on disk, and the caller needs to know which
+/// id was rejected instead of being shown an underlying file error.
+public enum SharedStoreError: Error, LocalizedError {
+    case unsafeIdentifier(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .unsafeIdentifier(let id):
+            return "'\(id)' is not a valid id. Ids may contain only letters, "
+                + "digits and hyphens, because they are used as file and folder names."
+        }
+    }
+}
+
 // MARK: - Store
 
 /// The app-wide collection: skills, connectors and automations.
@@ -500,6 +535,50 @@ public final class SharedStore {
         skills = loadSkills()
         connectors = loadConnectors()
         automations = loadAutomations()
+    }
+
+    // MARK: Ids
+
+    /// Validate an id and return it, or refuse.
+    ///
+    /// Every write and every remove goes through here. Before this existed,
+    /// `--id` on the CLI bypassed `Identifier.slug` entirely and the raw string
+    /// went straight into `appendingPathComponent`.
+    @discardableResult
+    private func checkedID(_ id: String) throws -> String {
+        guard Identifier.isSafePathComponent(id) else {
+            throw SharedStoreError.unsafeIdentifier(id)
+        }
+        return id
+    }
+
+    /// The directory for `id` inside `container`.
+    ///
+    /// The id is validated first, then the *resolved* path is re-checked
+    /// against the container. The second gate is not redundant: it is the only
+    /// one that accounts for what `..` actually does once the filesystem has
+    /// had a look at it, and it holds even for a caller that reaches this
+    /// method without going through `Identifier`.
+    private func directoryURL(_ id: String, in container: URL) throws -> URL {
+        let name = try checkedID(id)
+        let candidate = container.appendingPathComponent(name, isDirectory: true)
+        guard candidate.standardizedFileURL.path.hasPrefix(container.standardizedFileURL.path + "/") else {
+            throw SharedStoreError.unsafeIdentifier(id)
+        }
+        return candidate
+    }
+
+    /// The `<id>.json` file inside `container`.
+    ///
+    /// The extension is added *after* validation, so the id itself never has to
+    /// satisfy the slug rule with a dot in it.
+    private func fileURL(_ id: String, in container: URL) throws -> URL {
+        let name = try checkedID(id)
+        let candidate = container.appendingPathComponent("\(name).json", isDirectory: false)
+        guard candidate.standardizedFileURL.path.hasPrefix(container.standardizedFileURL.path + "/") else {
+            throw SharedStoreError.unsafeIdentifier(id)
+        }
+        return candidate
     }
 
     // MARK: Skills
@@ -543,7 +622,7 @@ public final class SharedStore {
         var skill = skill
         skill.updatedAt = Date()
 
-        let directory = paths.sharedSkills.appendingPathComponent(skill.id, isDirectory: true)
+        let directory = try directoryURL(skill.id, in: paths.sharedSkills)
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
 
         try skill.rendered().write(
@@ -572,7 +651,12 @@ public final class SharedStore {
     }
 
     public func removeSkill(id: String) throws {
-        try? fileManager.removeItem(at: paths.sharedSkills.appendingPathComponent(id))
+        // Resolved (and therefore validated) before the removal, so an unsafe
+        // id refuses loudly instead of being swallowed by `try?`. A directory
+        // that is simply absent is still tolerated: the caller asked for the
+        // entry to be gone, and it is.
+        let directory = try directoryURL(id, in: paths.sharedSkills)
+        try? fileManager.removeItem(at: directory)
         skills.removeAll { $0.id == id }
     }
 
@@ -607,7 +691,7 @@ public final class SharedStore {
         var connector = connector
         connector.updatedAt = Date()
 
-        let directory = paths.sharedConnectors.appendingPathComponent(connector.id, isDirectory: true)
+        let directory = try directoryURL(connector.id, in: paths.sharedConnectors)
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         try writeJSON(connector, to: directory.appendingPathComponent("connector.json"))
 
@@ -637,7 +721,8 @@ public final class SharedStore {
     }
 
     public func removeConnector(id: String) throws {
-        try? fileManager.removeItem(at: paths.sharedConnectors.appendingPathComponent(id))
+        let directory = try directoryURL(id, in: paths.sharedConnectors)
+        try? fileManager.removeItem(at: directory)
         connectors.removeAll { $0.id == id }
     }
 
@@ -669,7 +754,7 @@ public final class SharedStore {
         try fileManager.createDirectory(at: paths.sharedAutomations, withIntermediateDirectories: true)
         try writeJSON(
             automation,
-            to: paths.sharedAutomations.appendingPathComponent("\(automation.id).json")
+            to: try fileURL(automation.id, in: paths.sharedAutomations)
         )
 
         if let index = automations.firstIndex(where: { $0.id == automation.id }) {
@@ -690,9 +775,8 @@ public final class SharedStore {
     }
 
     public func removeAutomation(id: String) throws {
-        try? fileManager.removeItem(
-            at: paths.sharedAutomations.appendingPathComponent("\(id).json")
-        )
+        let file = try fileURL(id, in: paths.sharedAutomations)
+        try? fileManager.removeItem(at: file)
         automations.removeAll { $0.id == id }
     }
 
