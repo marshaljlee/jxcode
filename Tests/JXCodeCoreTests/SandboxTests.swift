@@ -334,23 +334,29 @@ final class ImportServiceTests: XCTestCase {
         try? FileManager.default.removeItem(at: host)
     }
 
+    private func type(at url: URL) throws -> FileAttributeType? {
+        (try FileManager.default.attributesOfItem(atPath: url.path))[.type] as? FileAttributeType
+    }
+
+    private func text(at url: URL) throws -> String {
+        try String(contentsOf: url, encoding: .utf8)
+    }
+
     /// The real-world case: `~/.claude/skills` is often a symlink into iCloud or
-    /// a shared repo. Dereferencing it would duplicate gigabytes, so the link
-    /// must be recreated as a link.
-    func testSymlinksAreRecreatedNotFollowed() throws {
+    /// a shared repo. Recreating that link inside the sandbox hands the sandbox
+    /// a live path to the host, so it is copied as content instead — and a write
+    /// inside the sandbox must stay inside it.
+    func testALinkOutOfTheSandboxIsCopiedNotRecreated() throws {
+        let fm = FileManager.default
         let claude = host.appendingPathComponent(".claude")
-        try "# host memory\n".write(
-            to: claude.appendingPathComponent("CLAUDE.md"),
-            atomically: true, encoding: .utf8
-        )
 
         let shared = host.appendingPathComponent("shared-skills")
-        try FileManager.default.createDirectory(at: shared, withIntermediateDirectories: true)
+        try fm.createDirectory(at: shared, withIntermediateDirectories: true)
         try "skill body".write(
             to: shared.appendingPathComponent("SKILL.md"),
             atomically: true, encoding: .utf8
         )
-        try FileManager.default.createSymbolicLink(
+        try fm.createSymbolicLink(
             atPath: claude.appendingPathComponent("skills").path,
             withDestinationPath: shared.path
         )
@@ -358,16 +364,328 @@ final class ImportServiceTests: XCTestCase {
         let plan = ImportService.plan(paths: paths, realHome: host.path)
         let entry = try XCTUnwrap(plan.entries.first { $0.source.lastPathComponent == "skills" })
         XCTAssertEqual(entry.kind, .symlink)
-        XCTAssertTrue(entry.escapesHostConfig, "a link out of the config dir should be flagged")
+        XCTAssertTrue(entry.escapesSandbox, "a link out of the sandbox should be flagged")
 
         try ImportService.apply(plan)
 
         let destination = paths.claudeConfig.appendingPathComponent("skills")
-        let attributes = try FileManager.default.attributesOfItem(atPath: destination.path)
         XCTAssertEqual(
-            attributes[.type] as? FileAttributeType, .typeSymbolicLink,
-            "the symlink was dereferenced into a real directory"
+            try type(at: destination), .typeDirectory,
+            "the link was recreated, so the sandbox holds a path back to the host"
         )
+        XCTAssertFalse(
+            destination.resolvingSymlinksInPath().path.hasPrefix(host.path),
+            "the import resolved to the host directory"
+        )
+        XCTAssertEqual(try text(at: destination.appendingPathComponent("SKILL.md")), "skill body")
+
+        // The harm the copy prevents: editing inside the sandbox must not edit
+        // the host.
+        try "edited in the sandbox".write(
+            to: destination.appendingPathComponent("SKILL.md"),
+            atomically: true, encoding: .utf8
+        )
+        XCTAssertEqual(
+            try text(at: shared.appendingPathComponent("SKILL.md")), "skill body",
+            "a write inside the sandbox reached the host"
+        )
+    }
+
+    /// A link is still a link when recreating it is safe: it resolves inside the
+    /// sandbox and to something that is actually there.
+    func testALinkThatResolvesInsideTheSandboxIsRecreated() throws {
+        let fm = FileManager.default
+        let claude = host.appendingPathComponent(".claude")
+
+        // The host side, needed for the link to be readable at all.
+        try fm.createDirectory(
+            at: host.appendingPathComponent("shared-skills"), withIntermediateDirectories: true
+        )
+        try "on host".write(
+            to: host.appendingPathComponent("shared-skills/SKILL.md"),
+            atomically: true, encoding: .utf8
+        )
+        try fm.createSymbolicLink(
+            atPath: claude.appendingPathComponent("skills").path,
+            withDestinationPath: "../shared-skills"
+        )
+
+        // The same relative target inside the sandbox, where the link will land.
+        try fm.createDirectory(
+            at: paths.home.appendingPathComponent("shared-skills"), withIntermediateDirectories: true
+        )
+        try "in sandbox".write(
+            to: paths.home.appendingPathComponent("shared-skills/SKILL.md"),
+            atomically: true, encoding: .utf8
+        )
+
+        let plan = ImportService.plan(paths: paths, realHome: host.path)
+        let entry = try XCTUnwrap(plan.entries.first { $0.source.lastPathComponent == "skills" })
+        XCTAssertFalse(entry.escapesSandbox, "a link that stays inside is not an escape")
+
+        try ImportService.apply(plan)
+
+        let destination = paths.claudeConfig.appendingPathComponent("skills")
+        XCTAssertEqual(try type(at: destination), .typeSymbolicLink)
+        XCTAssertEqual(
+            try text(at: destination.appendingPathComponent("SKILL.md")), "in sandbox",
+            "the recreated link resolved to the host, not to the sandbox"
+        )
+    }
+
+    /// `copyItem` reproduces a symlink as a symlink, so a link one level down in
+    /// a copied tree would survive the copy and escape anyway.
+    func testALinkInsideACopiedTreeIsNotRecreated() throws {
+        let fm = FileManager.default
+        let skills = host.appendingPathComponent(".claude/skills")
+        try fm.createDirectory(at: skills, withIntermediateDirectories: true)
+        try "top level".write(
+            to: skills.appendingPathComponent("TOP.md"), atomically: true, encoding: .utf8
+        )
+
+        let elsewhere = host.appendingPathComponent("elsewhere")
+        try fm.createDirectory(at: elsewhere, withIntermediateDirectories: true)
+        try "elsewhere body".write(
+            to: elsewhere.appendingPathComponent("E.md"), atomically: true, encoding: .utf8
+        )
+        try fm.createSymbolicLink(
+            atPath: skills.appendingPathComponent("nested").path,
+            withDestinationPath: elsewhere.path
+        )
+
+        try ImportService.apply(ImportService.plan(paths: paths, realHome: host.path))
+
+        let nested = paths.claudeConfig.appendingPathComponent("skills/nested")
+        XCTAssertEqual(
+            try type(at: nested), .typeDirectory,
+            "a link inside the copied tree was recreated, escaping the sandbox"
+        )
+        XCTAssertEqual(try text(at: nested.appendingPathComponent("E.md")), "elsewhere body")
+        XCTAssertEqual(
+            try text(at: paths.claudeConfig.appendingPathComponent("skills/TOP.md")), "top level",
+            "the rest of the tree should survive the link being replaced"
+        )
+    }
+
+    /// A link to a directory containing itself is a loop. `replaceLinks` must
+    /// terminate rather than copy until the disk fills.
+    func testALinkLoopTerminates() throws {
+        let fm = FileManager.default
+        let skills = host.appendingPathComponent(".claude/skills")
+        try fm.createDirectory(at: skills, withIntermediateDirectories: true)
+        try "top level".write(
+            to: skills.appendingPathComponent("TOP.md"), atomically: true, encoding: .utf8
+        )
+        try fm.createSymbolicLink(
+            atPath: skills.appendingPathComponent("loop").path,
+            withDestinationPath: skills.path
+        )
+        try fm.createSymbolicLink(
+            atPath: skills.appendingPathComponent("self").path,
+            withDestinationPath: "."
+        )
+
+        try ImportService.apply(ImportService.plan(paths: paths, realHome: host.path))
+
+        let destination = paths.claudeConfig.appendingPathComponent("skills")
+        XCTAssertEqual(try type(at: destination), .typeDirectory)
+        XCTAssertEqual(try text(at: destination.appendingPathComponent("TOP.md")), "top level")
+        XCTAssertNil(
+            try? type(at: destination.appendingPathComponent("self")),
+            "a link to its own directory was followed instead of dropped"
+        )
+    }
+
+    /// Two directories that link to each other. Neither link contains its own
+    /// target, so only the record of what has already been copied stops the
+    /// tree being duplicated once per level.
+    func testMutuallyRecursiveLinksTerminate() throws {
+        let fm = FileManager.default
+        let skills = host.appendingPathComponent(".claude/skills")
+        try fm.createDirectory(at: skills, withIntermediateDirectories: true)
+        try "top level".write(
+            to: skills.appendingPathComponent("TOP.md"), atomically: true, encoding: .utf8
+        )
+        let other = host.appendingPathComponent("other")
+        try fm.createDirectory(at: other, withIntermediateDirectories: true)
+        try "other body".write(
+            to: other.appendingPathComponent("O.md"), atomically: true, encoding: .utf8
+        )
+        try fm.createSymbolicLink(
+            atPath: skills.appendingPathComponent("other").path,
+            withDestinationPath: other.path
+        )
+        try fm.createSymbolicLink(
+            atPath: other.appendingPathComponent("back").path,
+            withDestinationPath: skills.path
+        )
+
+        try ImportService.apply(ImportService.plan(paths: paths, realHome: host.path))
+
+        let destination = paths.claudeConfig.appendingPathComponent("skills")
+        XCTAssertEqual(try text(at: destination.appendingPathComponent("TOP.md")), "top level")
+        XCTAssertEqual(
+            try text(at: destination.appendingPathComponent("other/O.md")), "other body"
+        )
+        XCTAssertNil(
+            try? type(at: destination.appendingPathComponent("other/back")),
+            "a link back to a directory already copied was duplicated instead of dropped"
+        )
+    }
+
+    /// A broken link is still an entry at the destination. Without an overwrite
+    /// it must be left alone, not silently replaced.
+    func testADanglingDestinationIsKeptWhenNotOverwriting() throws {
+        let fm = FileManager.default
+        try "# host memory\n".write(
+            to: host.appendingPathComponent(".claude/CLAUDE.md"),
+            atomically: true, encoding: .utf8
+        )
+        let destination = paths.claudeConfig.appendingPathComponent("CLAUDE.md")
+        try fm.createDirectory(
+            at: destination.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        try fm.createSymbolicLink(
+            atPath: destination.path,
+            withDestinationPath: host.appendingPathComponent("gone.md").path
+        )
+
+        let messages = try ImportService.apply(
+            ImportService.plan(paths: paths, realHome: host.path)
+        )
+        XCTAssertTrue(
+            messages.contains { $0.contains("kept existing") },
+            "a broken link at the destination was not recognised as existing: \(messages)"
+        )
+        XCTAssertEqual(try type(at: destination), .typeSymbolicLink)
+    }
+
+    /// The finding: `removeItem` then `copyItem` leaves nothing behind if the
+    /// copy fails. The existing destination must survive a failed import.
+    func testAFailedImportLeavesTheExistingDestinationIntact() throws {
+        let fm = FileManager.default
+        let skills = host.appendingPathComponent(".claude/skills")
+        try fm.createDirectory(at: skills, withIntermediateDirectories: true)
+        try "host version".write(
+            to: skills.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8
+        )
+        // Unreadable, so the copy fails part way through the tree.
+        let locked = skills.appendingPathComponent("locked.md")
+        try "secret".write(to: locked, atomically: true, encoding: .utf8)
+        try fm.setAttributes([.posixPermissions: 0o000], ofItemAtPath: locked.path)
+
+        let destination = paths.claudeConfig.appendingPathComponent("skills")
+        try fm.createDirectory(at: destination, withIntermediateDirectories: true)
+        try "existing".write(
+            to: destination.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8
+        )
+
+        let plan = ImportService.plan(paths: paths, realHome: host.path)
+        XCTAssertThrowsError(
+            try ImportService.apply(plan, overwrite: true),
+            "the unreadable file should make the copy fail"
+        )
+        XCTAssertEqual(
+            try text(at: destination.appendingPathComponent("SKILL.md")), "existing",
+            "the destination was destroyed before its replacement existed"
+        )
+    }
+
+    /// Overwrite replaces the whole item: content is swapped in, and nothing
+    /// that was only at the old destination survives.
+    func testOverwriteReplacesADirectoryAndLeavesNothingBehind() throws {
+        let fm = FileManager.default
+        let skills = host.appendingPathComponent(".claude/skills")
+        try fm.createDirectory(at: skills, withIntermediateDirectories: true)
+        try "new".write(
+            to: skills.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8
+        )
+
+        let destination = paths.claudeConfig.appendingPathComponent("skills")
+        try fm.createDirectory(at: destination, withIntermediateDirectories: true)
+        try "old".write(
+            to: destination.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8
+        )
+        try "only in the old one".write(
+            to: destination.appendingPathComponent("STALE.md"), atomically: true, encoding: .utf8
+        )
+
+        try ImportService.apply(
+            ImportService.plan(paths: paths, realHome: host.path), overwrite: true
+        )
+
+        XCTAssertEqual(try text(at: destination.appendingPathComponent("SKILL.md")), "new")
+        XCTAssertNil(
+            try? type(at: destination.appendingPathComponent("STALE.md")),
+            "the replace merged into the old directory instead of replacing it"
+        )
+        let leftovers = try fm.contentsOfDirectory(
+            at: paths.claudeConfig, includingPropertiesForKeys: nil
+        )
+        XCTAssertEqual(
+            leftovers.filter { $0.lastPathComponent.hasPrefix(".skills") }, [],
+            "a staging item was left behind: \(leftovers.map(\.lastPathComponent))"
+        )
+    }
+
+    /// A destination that is a symlink — the state a previous, buggy import left
+    /// behind. `FileManager.replaceItemAt` refuses these outright, and writing
+    /// through the link would reach the host.
+    func testOverwriteReplacesASymlinkDestinationWithoutWritingThroughIt() throws {
+        let fm = FileManager.default
+        let outside = host.appendingPathComponent("outside.md")
+        try "host original".write(to: outside, atomically: true, encoding: .utf8)
+
+        try "# host memory\n".write(
+            to: host.appendingPathComponent(".claude/CLAUDE.md"),
+            atomically: true, encoding: .utf8
+        )
+
+        let destination = paths.claudeConfig.appendingPathComponent("CLAUDE.md")
+        try fm.createDirectory(
+            at: destination.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        try fm.createSymbolicLink(atPath: destination.path, withDestinationPath: outside.path)
+
+        try ImportService.apply(
+            ImportService.plan(paths: paths, realHome: host.path), overwrite: true
+        )
+
+        XCTAssertEqual(
+            try type(at: destination), .typeRegular,
+            "the symlink destination was not replaced"
+        )
+        XCTAssertEqual(try text(at: destination), "# host memory\n")
+        XCTAssertEqual(
+            try text(at: outside), "host original",
+            "the import wrote through the link and onto the host"
+        )
+    }
+
+    /// A broken link at the destination reads as absent to `fileExists`, so the
+    /// write used to fail with "file exists" and the entry was lost.
+    func testADanglingDestinationIsReplaced() throws {
+        let fm = FileManager.default
+        try "# host memory\n".write(
+            to: host.appendingPathComponent(".claude/CLAUDE.md"),
+            atomically: true, encoding: .utf8
+        )
+
+        let destination = paths.claudeConfig.appendingPathComponent("CLAUDE.md")
+        try fm.createDirectory(
+            at: destination.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        try fm.createSymbolicLink(
+            atPath: destination.path,
+            withDestinationPath: host.appendingPathComponent("gone.md").path
+        )
+
+        try ImportService.apply(
+            ImportService.plan(paths: paths, realHome: host.path), overwrite: true
+        )
+
+        XCTAssertEqual(try type(at: destination), .typeRegular)
+        XCTAssertEqual(try text(at: destination), "# host memory\n")
     }
 
     func testRegularFilesAreCopiedWithContent() throws {
