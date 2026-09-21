@@ -367,6 +367,119 @@ final class SharedCollectionTests: XCTestCase {
 
     // MARK: - SkillBinder
 
+    // MARK: - Pruning
+
+    /// The prune asked whether a link's destination *started with* the shared
+    /// skills directory, so `…/shared/skills-archive` — a sibling, and exactly
+    /// the sort of directory someone keeps archived skills in — answered yes
+    /// and was deleted. The trailing slash is the whole difference.
+    func testPruningLeavesASiblingOfTheSharedDirectoryAlone() throws {
+        let fm = FileManager.default
+        let archive = try makeSiblingOfSharedSkills()
+        let link = paths.claudeSkills.appendingPathComponent("archive")
+        try fm.createSymbolicLink(atPath: link.path, withDestinationPath: archive.path)
+
+        _ = try SkillBinder.apply(skills: [skill()], agents: AgentRegistry.builtIns, paths: paths)
+
+        XCTAssertEqual(
+            try? fm.destinationOfSymbolicLink(atPath: link.path), archive.path,
+            "a link to a sibling of the shared skills directory was deleted"
+        )
+    }
+
+    /// The same decision is made again on revert, on a different path.
+    func testRevertLeavesASiblingOfTheSharedDirectoryAlone() throws {
+        let fm = FileManager.default
+        let archive = try makeSiblingOfSharedSkills()
+        let link = paths.claudeSkills.appendingPathComponent("archive")
+        try fm.createSymbolicLink(atPath: link.path, withDestinationPath: archive.path)
+
+        _ = try SkillBinder.revert(agents: AgentRegistry.builtIns, paths: paths)
+
+        XCTAssertEqual(
+            try? fm.destinationOfSymbolicLink(atPath: link.path), archive.path,
+            "revert deleted a link to a sibling of the shared skills directory"
+        )
+    }
+
+    /// The prune still has to work. A link of ours whose skill is gone is
+    /// dangling, and leaving it is what makes a deleted skill still show up in
+    /// Claude Code.
+    func testAStaleLinkOfOursIsPruned() throws {
+        let fm = FileManager.default
+        try fm.createDirectory(at: paths.claudeSkills, withIntermediateDirectories: true)
+        let gone = paths.sharedSkills.appendingPathComponent("gone", isDirectory: true)
+        try fm.createDirectory(at: gone, withIntermediateDirectories: true)
+        let link = paths.claudeSkills.appendingPathComponent("gone")
+        try fm.createSymbolicLink(atPath: link.path, withDestinationPath: gone.path)
+        try fm.removeItem(at: gone)   // the skill was deleted out from under it
+
+        _ = try SkillBinder.apply(skills: [skill()], agents: AgentRegistry.builtIns, paths: paths)
+
+        XCTAssertNil(
+            try? fm.destinationOfSymbolicLink(atPath: link.path),
+            "a stale link of ours was left behind"
+        )
+    }
+
+    /// A link that points into the shared directory relatively is still ours.
+    func testARelativeLinkIntoTheSharedDirectoryIsPruned() throws {
+        let fm = FileManager.default
+        try fm.createDirectory(at: paths.claudeSkills, withIntermediateDirectories: true)
+        try fm.createDirectory(at: paths.sharedSkills, withIntermediateDirectories: true)
+        let link = paths.claudeSkills.appendingPathComponent("relative")
+        let target = paths.sharedSkills.appendingPathComponent("release", isDirectory: true)
+        try fm.createDirectory(at: target, withIntermediateDirectories: true)
+        // Resolved from the directory holding the link, not from wherever we
+        // happen to be running — and pointed at a skill, not at the directory
+        // itself, which is not inside itself.
+        try fm.createSymbolicLink(
+            atPath: link.path,
+            withDestinationPath: relativePath(from: paths.claudeSkills, to: target)
+        )
+
+        _ = try SkillBinder.apply(skills: [skill()], agents: AgentRegistry.builtIns, paths: paths)
+
+        XCTAssertNil(
+            try? fm.destinationOfSymbolicLink(atPath: link.path),
+            "a relative link into the shared directory was not recognised as ours"
+        )
+    }
+
+    func testALinkToSomewhereElseEntirelyIsLeftAlone() throws {
+        let fm = FileManager.default
+        try fm.createDirectory(at: paths.claudeSkills, withIntermediateDirectories: true)
+        let mine = root.appendingPathComponent("my-own-skills", isDirectory: true)
+        try fm.createDirectory(at: mine, withIntermediateDirectories: true)
+        let link = paths.claudeSkills.appendingPathComponent("mine")
+        try fm.createSymbolicLink(atPath: link.path, withDestinationPath: mine.path)
+
+        _ = try SkillBinder.apply(skills: [skill()], agents: AgentRegistry.builtIns, paths: paths)
+
+        XCTAssertEqual(try? fm.destinationOfSymbolicLink(atPath: link.path), mine.path)
+    }
+
+    /// `…/shared/skills-archive`: the name that made the prefix test answer yes.
+    private func makeSiblingOfSharedSkills() throws -> URL {
+        let fm = FileManager.default
+        try fm.createDirectory(at: paths.claudeSkills, withIntermediateDirectories: true)
+        let archive = paths.shared.appendingPathComponent("skills-archive", isDirectory: true)
+        try fm.createDirectory(at: archive, withIntermediateDirectories: true)
+        return archive
+    }
+
+    /// `../../skills` — a link written the way a person would, not the way we
+    /// write them.
+    private func relativePath(from base: URL, to target: URL) -> String {
+        var left = base.standardizedFileURL.pathComponents
+        var right = target.standardizedFileURL.pathComponents
+        while !left.isEmpty, left.first == right.first {
+            left.removeFirst()
+            right.removeFirst()
+        }
+        return String(repeating: "../", count: left.count) + right.joined(separator: "/")
+    }
+
     func testBindingSkillsWritesAFencedBlockIntoEveryAgentThatReadsOne() throws {
         let reports = try SkillBinder.apply(
             skills: [skill()],

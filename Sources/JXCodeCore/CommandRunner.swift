@@ -79,30 +79,48 @@ public enum CommandRunner {
         process.standardOutput = outPipe
         process.standardError = errPipe
 
-        let lock = NSLock()
-        var outData = Data()
-        var errData = Data()
+        /// One reader, one handle, read once to the end.
+        ///
+        /// Touched by its own queue and by nobody else until the group has
+        /// completed, which is the happens-before that lets `data` be read
+        /// afterwards without a lock.
+        final class Reader: @unchecked Sendable {
+            let handle: FileHandle
+            private(set) var data = Data()
 
-        // Read concurrently. A pipe buffer that fills while we block on
-        // waitUntilExit would deadlock the child.
-        outPipe.fileHandleForReading.readabilityHandler = { handle in
-            let chunk = handle.availableData
-            guard !chunk.isEmpty else { return }
-            lock.lock(); outData.append(chunk); lock.unlock()
+            init(_ handle: FileHandle) { self.handle = handle }
+
+            func read() { data.append(handle.readDataToEndOfFile()) }
         }
-        errPipe.fileHandleForReading.readabilityHandler = { handle in
-            let chunk = handle.availableData
-            guard !chunk.isEmpty else { return }
-            lock.lock(); errData.append(chunk); lock.unlock()
-        }
+
+        let outReader = Reader(outPipe.fileHandleForReading)
+        let errReader = Reader(errPipe.fileHandleForReading)
 
         do {
             try process.run()
         } catch {
-            outPipe.fileHandleForReading.readabilityHandler = nil
-            errPipe.fileHandleForReading.readabilityHandler = nil
             throw CommandError.launchFailed(error.localizedDescription)
         }
+
+        // Read both pipes concurrently, each on a queue of its own. Draining
+        // them while we wait is the point: a pipe buffer that fills while we
+        // block on the process would deadlock the child.
+        //
+        // Deliberately not `readabilityHandler`. Tearing one down cannot be
+        // synchronised with an invocation already in flight — setting it to nil
+        // does not stop a handler that is between `availableData` and the append
+        // that follows it — so a `readDataToEndOfFile` afterwards reads the same
+        // handle from another thread, and the late chunk is appended *after* the
+        // rest rather than before it. Two readers that each own one handle have
+        // nothing to tear down.
+        //
+        // Started after a successful launch so a failed one leaves no reader
+        // waiting on a pipe nobody will ever close.
+        let group = DispatchGroup()
+        DispatchQueue(label: "jxcode.command-runner.stdout")
+            .async(group: group) { outReader.read() }
+        DispatchQueue(label: "jxcode.command-runner.stderr")
+            .async(group: group) { errReader.read() }
 
         let deadline = Date().addingTimeInterval(timeout)
         while process.isRunning && Date() < deadline {
@@ -117,21 +135,16 @@ public enum CommandRunner {
             process.waitUntilExit()
         }
 
-        outPipe.fileHandleForReading.readabilityHandler = nil
-        errPipe.fileHandleForReading.readabilityHandler = nil
-
-        let outRest = outPipe.fileHandleForReading.readDataToEndOfFile()
-        let errRest = errPipe.fileHandleForReading.readDataToEndOfFile()
-        lock.lock()
-        outData.append(outRest)
-        errData.append(errRest)
-        lock.unlock()
+        group.wait()
+        // Both pipes reached EOF, so the process has already exited; reaping it
+        // is what makes `terminationStatus` meaningful.
+        process.waitUntilExit()
 
         return CommandResult(
             executable: executable,
             exitCode: process.terminationStatus,
-            stdout: String(decoding: outData, as: UTF8.self),
-            stderr: String(decoding: errData, as: UTF8.self),
+            stdout: String(decoding: outReader.data, as: UTF8.self),
+            stderr: String(decoding: errReader.data, as: UTF8.self),
             timedOut: timedOut
         )
     }

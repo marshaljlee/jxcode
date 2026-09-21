@@ -564,7 +564,7 @@ public final class SharedStore {
     private func directoryURL(_ id: String, in container: URL) throws -> URL {
         let name = try checkedID(id)
         let candidate = container.appendingPathComponent(name, isDirectory: true)
-        guard candidate.standardizedFileURL.path.hasPrefix(container.standardizedFileURL.path + "/") else {
+        guard candidate.isContained(in: container) else {
             throw SharedStoreError.unsafeIdentifier(id)
         }
         return candidate
@@ -577,7 +577,7 @@ public final class SharedStore {
     private func fileURL(_ id: String, in container: URL) throws -> URL {
         let name = try checkedID(id)
         let candidate = container.appendingPathComponent("\(name).json", isDirectory: false)
-        guard candidate.standardizedFileURL.path.hasPrefix(container.standardizedFileURL.path + "/") else {
+        guard candidate.isContained(in: container) else {
             throw SharedStoreError.unsafeIdentifier(id)
         }
         return candidate

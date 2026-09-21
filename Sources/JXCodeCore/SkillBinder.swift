@@ -277,7 +277,7 @@ public enum SkillBinder {
         for name in existing where !live.contains(name) {
             let link = paths.claudeSkills.appendingPathComponent(name)
             guard let destination = try? fm.destinationOfSymbolicLink(atPath: link.path),
-                  destination.hasPrefix(paths.sharedSkills.path)
+                  linkURL(destination, at: link).isContained(in: paths.sharedSkills)
             else { continue }   // not ours — a real directory or a foreign link
             try? fm.removeItem(at: link)
             pruned += 1
@@ -332,13 +332,30 @@ public enum SkillBinder {
         for name in existing {
             let link = paths.claudeSkills.appendingPathComponent(name)
             guard let destination = try? fm.destinationOfSymbolicLink(atPath: link.path),
-                  destination.hasPrefix(paths.sharedSkills.path)
+                  linkURL(destination, at: link).isContained(in: paths.sharedSkills)
             else { continue }
             try? fm.removeItem(at: link)
             messages.append("unlinked \(name) from Claude Code skills")
         }
 
         return messages
+    }
+
+    /// Where a link's destination actually points, ready to be compared.
+    ///
+    /// `destinationOfSymbolicLink` hands back the target exactly as it was
+    /// written, which for a link someone else created can be relative — and a
+    /// relative path is resolved from the directory holding the link, not from
+    /// wherever we happen to be running.
+    private static func linkURL(_ destination: String, at link: URL) -> URL {
+        let directory = link.deletingLastPathComponent()
+        // Appended to the directory and standardised by `isContained(in:)`,
+        // which is what resolves the `..`. Asking for a URL relative to the
+        // directory instead leaves the result *relative*, and a relative path
+        // is never inside anything.
+        return destination.hasPrefix("/")
+            ? URL(fileURLWithPath: destination)
+            : directory.appendingPathComponent(destination)
     }
 
     private static func backUp(_ file: URL) {
