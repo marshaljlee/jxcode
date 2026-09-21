@@ -517,6 +517,98 @@ final class TranslationStreamTests: XCTestCase {
         XCTAssertEqual(indices, [0, 1])
     }
 
+    /// Two parallel calls from a backend that omits `index`.
+    ///
+    /// Both used to hash to the same key, so the second was read as a
+    /// continuation of the first: its id and name dropped, its arguments
+    /// appended to the other call's JSON.
+    func testTwoParallelCallsWithoutAnIndexAreNotMerged() throws {
+        var translator = Translation.StreamTranslator(model: "m", inputTokens: 1)
+        var output = translator.consume(try upstreamChunk(#"""
+        {"choices":[{"index":0,"delta":{"tool_calls":[
+          {"id":"a","function":{"name":"one","arguments":"{\"i\":1}"}},
+          {"id":"b","function":{"name":"two","arguments":"{\"i\":2}"}}]}}]}
+        """#))
+        output += translator.finalize()
+
+        let starts = frames(output).filter { $0.event == "content_block_start" }
+        XCTAssertEqual(starts.count, 2)
+
+        let blocks = starts.compactMap { $0.payload.objectValue?["content_block"]?.objectValue }
+        XCTAssertEqual(blocks.compactMap { $0["id"]?.stringValue }, ["a", "b"])
+        XCTAssertEqual(blocks.compactMap { $0["name"]?.stringValue }, ["one", "two"])
+
+        // Each call's arguments have to stand alone: concatenated, they are not
+        // JSON at all.
+        let fragments = frames(output)
+            .filter { $0.event == "content_block_delta" }
+            .compactMap { $0.payload.objectValue?["delta"]?.objectValue?["partial_json"]?.stringValue }
+        XCTAssertEqual(fragments.count, 2)
+        XCTAssertTrue(fragments.allSatisfy { JSONValue.parse($0).objectValue != nil })
+    }
+
+    /// A different id at an index already in use is a different call, not
+    /// another fragment of the last one.
+    func testAChangedIdAtAReusedIndexStartsANewCall() throws {
+        var translator = Translation.StreamTranslator(model: "m", inputTokens: 1)
+        var output = translator.consume(try upstreamChunk(#"""
+        {"choices":[{"index":0,"delta":{"tool_calls":[
+          {"index":0,"id":"a","function":{"name":"one","arguments":"{}"}}]}}]}
+        """#))
+        output += translator.consume(try upstreamChunk(#"""
+        {"choices":[{"index":0,"delta":{"tool_calls":[
+          {"index":0,"id":"b","function":{"name":"two","arguments":"{}"}}]}}]}
+        """#))
+        output += translator.finalize()
+
+        let blocks = frames(output)
+            .filter { $0.event == "content_block_start" }
+            .compactMap { $0.payload.objectValue?["content_block"]?.objectValue }
+        XCTAssertEqual(blocks.compactMap { $0["id"]?.stringValue }, ["a", "b"])
+    }
+
+    /// A fragment identifying nothing — no index, no id, no name — still joins
+    /// the most recent call rather than being dropped.
+    func testAnUnidentifiedFragmentJoinsTheMostRecentCall() throws {
+        var translator = Translation.StreamTranslator(model: "m", inputTokens: 1)
+        var output = translator.consume(try upstreamChunk(#"""
+        {"choices":[{"index":0,"delta":{"tool_calls":[
+          {"index":0,"id":"a","function":{"name":"one","arguments":"{\"pa"}}]}}]}
+        """#))
+        output += translator.consume(try upstreamChunk(#"""
+        {"choices":[{"index":0,"delta":{"tool_calls":[
+          {"function":{"arguments":"th\":\"x\"}"}}]}}]}
+        """#))
+        output += translator.finalize()
+
+        let fragments = frames(output)
+            .filter { $0.event == "content_block_delta" }
+            .compactMap { $0.payload.objectValue?["delta"]?.objectValue?["partial_json"]?.stringValue }
+        XCTAssertEqual(fragments.count, 2)
+        XCTAssertEqual(
+            JSONValue.parse(fragments.joined()).objectValue?["path"]?.stringValue, "x"
+        )
+    }
+
+    /// No index and no id at all: the name is then the only identity, and a
+    /// repeat of it is a continuation rather than a second call.
+    func testARepeatedNameWithoutAnIndexIsAContinuation() throws {
+        var translator = Translation.StreamTranslator(model: "m", inputTokens: 1)
+        var output = translator.consume(try upstreamChunk(#"""
+        {"choices":[{"index":0,"delta":{"tool_calls":[
+          {"function":{"name":"one","arguments":"{\"pa"}}]}}]}
+        """#))
+        output += translator.consume(try upstreamChunk(#"""
+        {"choices":[{"index":0,"delta":{"tool_calls":[
+          {"function":{"name":"one","arguments":"th\":\"x\"}"}}]}}]}
+        """#))
+        output += translator.finalize()
+
+        XCTAssertEqual(
+            frames(output).filter { $0.event == "content_block_start" }.count, 1
+        )
+    }
+
     func testThinkingThenTextProducesTwoOrderedBlocks() throws {
         var translator = Translation.StreamTranslator(model: "m", inputTokens: 1)
         var output = translator.consume(try upstreamChunk("""

@@ -357,10 +357,19 @@ public enum Translation {
         private var nextIndex = 0
         private var open: OpenBlock?
 
-        /// Maps an OpenAI `tool_calls[].index` onto the Anthropic block index it
-        /// was assigned. Backends reuse that index across argument fragments, so
-        /// without this every fragment would start a new tool call.
-        private var toolBlockIndex: [Int: Int] = [:]
+        /// Identifies each tool call across chunks and maps it onto the Anthropic
+        /// block index it was assigned.
+        ///
+        /// The key is the `index` when the backend sends one, then the call's
+        /// `id`, then its name — never a constant. Keying every index-less call
+        /// alike made the second of two parallel calls read as a continuation of
+        /// the first: its id and name dropped, its arguments appended to the
+        /// other call's JSON.
+        ///
+        /// The id is kept beside the index so that a *changed* id at an index
+        /// already in use is recognised as a distinct call rather than as another
+        /// fragment of the previous one.
+        private var toolBlocks: [String: (index: Int, id: String?)] = [:]
         private var sawToolUse = false
         private var outputCharacters = 0
 
@@ -514,25 +523,43 @@ public enum Translation {
 
         private mutating func appendToolCall(_ call: OpenAIToolCall) -> [String] {
             var out: [String] = []
-            let callIndex = call.index ?? 0
 
-            if let blockIndex = toolBlockIndex[callIndex] {
-                // A continuation: only the argument fragment is new.
+            // How this call is recognised across chunks: `index` when the backend
+            // sends one, otherwise the id, otherwise the name. Never a constant —
+            // keying every index-less call alike is what made the second of two
+            // parallel calls read as a continuation of the first.
+            let key: String?
+            if let index = call.index {
+                key = "index:\(index)"
+            } else if let id = call.id, !id.isEmpty {
+                key = "id:\(id)"
+            } else if let name = call.function?.name, !name.isEmpty {
+                key = "name:\(name)"
+            } else {
+                key = nil
+            }
+
+            // A continuation, but only if the id agrees: a different id at an
+            // index already in use is a different call, not another fragment of
+            // the one before it.
+            if let key, let known = toolBlocks[key],
+               call.id == nil || call.id == known.id {
+                // Only the argument fragment is new.
                 if let fragment = call.function?.arguments, !fragment.isEmpty {
-                    out.append(AnthropicSSE.inputJSONDelta(index: blockIndex, partialJSON: fragment))
+                    out.append(AnthropicSSE.inputJSONDelta(index: known.index, partialJSON: fragment))
                 }
                 return out
             }
 
             // First sighting of this tool call. A backend that omits `index`
-            // entirely sends the whole call in one chunk, so treat the id or
-            // name as the signal that a new call has begun.
+            // entirely sends the whole call in one chunk, so the id or the name
+            // is what marks the start of a new one.
             let isNewCall = call.id != nil || call.function?.name != nil
             guard isNewCall else {
-                // Argument fragment with no index and no preceding start —
-                // attribute it to the most recent tool block rather than
+                // Argument fragment with no index, no id and no preceding start
+                // — attribute it to the most recent tool block rather than
                 // dropping it, which would corrupt the arguments.
-                if let last = toolBlockIndex.values.max(),
+                if let last = toolBlocks.values.map({ $0.index }).max(),
                    let fragment = call.function?.arguments, !fragment.isEmpty {
                     out.append(AnthropicSSE.inputJSONDelta(index: last, partialJSON: fragment))
                 }
@@ -547,7 +574,7 @@ public enum Translation {
             let index = nextIndex
             nextIndex += 1
             open = .tool(index)
-            toolBlockIndex[callIndex] = index
+            if let key { toolBlocks[key] = (index: index, id: call.id) }
             sawToolUse = true
 
             out.append(AnthropicSSE.toolBlockStart(
