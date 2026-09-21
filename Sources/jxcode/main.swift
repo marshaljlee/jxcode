@@ -405,35 +405,6 @@ enum CLIError: Error, CustomStringConvertible {
     }
 }
 
-struct Flags {
-    var positional: [String] = []
-    var options: [String: String] = [:]
-
-    func has(_ name: String) -> Bool { options[name] != nil }
-    func value(_ name: String) -> String? { options[name] }
-}
-
-func parseFlags(_ arguments: [String]) -> Flags {
-    var flags = Flags()
-    var index = 0
-    while index < arguments.count {
-        let argument = arguments[index]
-        if argument.hasPrefix("--") {
-            // `--key value` when a value follows and is not itself a flag.
-            if index + 1 < arguments.count, !arguments[index + 1].hasPrefix("--") {
-                flags.options[argument] = arguments[index + 1]
-                index += 2
-                continue
-            }
-            flags.options[argument] = ""
-        } else {
-            flags.positional.append(argument)
-        }
-        index += 1
-    }
-    return flags
-}
-
 func resolveWorkspace(sandbox: Sandbox, flags: Flags) throws -> Workspace? {
     guard let name = flags.value("--workspace") else { return nil }
     let store = WorkspaceStore(paths: sandbox.paths)

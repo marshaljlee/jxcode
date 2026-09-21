@@ -91,10 +91,6 @@ func cmdSharedBind(sandbox: Sandbox, flags: Flags) throws {
         sandbox: sandbox,
         onProgress: { _, message in print("  \(message)") }
     )
-    for outcome in installs where !outcome.succeeded {
-        print("  \(outcome.agentName): \(outcome.failureMessage ?? "install failed")")
-    }
-
     print("binding skills")
     for report in try SkillBinder.apply(
         skills: skills,
@@ -107,13 +103,26 @@ func cmdSharedBind(sandbox: Sandbox, flags: Flags) throws {
 
     print("")
     print("binding connectors")
-    for report in try ConnectorBinder.apply(
+    let bound = try ConnectorBinder.apply(
         connectors: connectors,
         agents: registry.agents,
         paths: sandbox.paths
-    ) {
+    )
+    for report in bound {
         print("  \(report.summary)")
         for note in report.notes { print("      \(note)") }
+    }
+
+    // A bind that printed what went wrong and then exited 0 told a script
+    // nothing: `shared-bind && run` carried on against a sandbox that is only
+    // half bound. Failures are collected rather than printed where they happen,
+    // so each one is reported once and the exit code can follow from them.
+    let failures = SharedBind.failures(installs: installs, connectors: bound)
+    guard failures.isEmpty else {
+        print("")
+        print("\(failures.count) \(failures.count == 1 ? "thing did" : "things did") not bind:")
+        for failure in failures { print("  \(failure.line)") }
+        exit(1)
     }
 }
 
