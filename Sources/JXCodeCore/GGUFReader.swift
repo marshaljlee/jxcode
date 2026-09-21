@@ -632,12 +632,27 @@ public enum GGUFReader {
         }
     }
 
+    /// How deep nested arrays may go before the reader refuses them.
+    ///
+    /// llama.cpp emits none, so any depth at all is a hand-built file — and
+    /// each level costs a stack frame, twelve bytes of header buys one, and the
+    /// byte budget is only checked between metadata entries. A megabyte of
+    /// nothing but nested array headers was enough to overflow the stack
+    /// outright.
+    private static let maxArrayNesting = 8
+
     private static func skipArrayElements(
         _ reader: GGUFByteReader,
         type: GGUFType,
         count: UInt64,
-        options: GGUFReadOptions
+        options: GGUFReadOptions,
+        depth: Int = 0
     ) throws {
+        guard depth <= maxArrayNesting else {
+            throw GGUFError.corrupt(
+                "nested arrays more than \(maxArrayNesting) deep; llama.cpp emits none"
+            )
+        }
         // Fixed-width arrays can be jumped in one seek — this is the common case
         // for `tokenizer.ggml.scores` and `tokenizer.ggml.token_type`.
         if let width = type.fixedWidth {
@@ -661,14 +676,22 @@ public enum GGUFReader {
                 try reader.skipBytes(Int(length))
             }
         case .array:
-            // Nested arrays are legal but never used by llama.cpp metadata.
+            // Nested arrays are legal but never used by llama.cpp metadata, and
+            // every level is another frame — hence the depth, which is the only
+            // thing here that recursion can grow without bound.
             for _ in 0..<count {
                 let elementRaw = try reader.readUInt32()
                 guard let elementType = GGUFType(rawValue: elementRaw) else {
                     throw GGUFError.corrupt("unknown nested array element type \(elementRaw)")
                 }
                 let inner = try reader.readUInt64()
-                try skipArrayElements(reader, type: elementType, count: inner, options: options)
+                try skipArrayElements(
+                    reader,
+                    type: elementType,
+                    count: inner,
+                    options: options,
+                    depth: depth + 1
+                )
             }
         default:
             throw GGUFError.corrupt("cannot skip array of \(type)")

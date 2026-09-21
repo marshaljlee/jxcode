@@ -21,6 +21,48 @@ final class GGUFReaderTests: XCTestCase {
         return url
     }
 
+    // MARK: - Nesting
+
+    /// A chain of nested arrays tens of thousands deep must be refused, not
+    /// walked.
+    ///
+    /// `skipArrayElements` recurses once per level with no limit, so the depth
+    /// of a hostile file decides how deep the stack goes. Twelve bytes buys one
+    /// level, so a megabyte of header buys about eighty thousand — far past any
+    /// stack. llama.cpp emits no nested arrays at all, which is what makes a
+    /// small cap safe.
+    func testADeeplyNestedArrayIsRefused() throws {
+        let url = try write(
+            GGUFFixtureBuilder().withNestedArrayChain("hostile.nested", depth: 50_000)
+        )
+
+        do {
+            _ = try GGUFReader.readHeader(at: url)
+            XCTFail("a chain this deep should be refused")
+        } catch let error as GGUFError {
+            guard case .corrupt(let detail) = error else {
+                return XCTFail("expected a corrupt error, got \(error)")
+            }
+            XCTAssertTrue(
+                detail.contains("nested"),
+                "the reason should name the nesting: \(detail)"
+            )
+        }
+    }
+
+    /// Shallow nesting is legal, and the cap must not cost us the ability to
+    /// read it.
+    func testShallowNestingIsStillRead() throws {
+        let url = try write(
+            GGUFFixtureBuilder()
+                .withNestedArrayChain("hostile.nested", depth: 2)
+                .with("general.architecture", "llama")
+        )
+
+        let header = try GGUFReader.readHeader(at: url)
+        XCTAssertEqual(header.metadataCount, 2)
+    }
+
     // MARK: - Header
 
     func testReadsMagicVersionAndCounts() throws {

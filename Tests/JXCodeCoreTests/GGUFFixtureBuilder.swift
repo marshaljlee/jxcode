@@ -13,6 +13,14 @@ struct GGUFFixtureBuilder {
     var tensorCount: UInt64 = 0
     var entries: [(key: String, value: GGUFValue)] = []
 
+    /// Value bytes written verbatim, for shapes `GGUFValue` cannot carry.
+    ///
+    /// A chain of nested arrays is the case. Building one as a `GGUFValue` is
+    /// easy — the loop is iterative — but *writing* one recurses once per level,
+    /// so the writer would overflow its own stack long before the reader got a
+    /// chance to. These bytes are appended after the ordinary entries.
+    var rawEntries: [(key: String, bytes: Data)] = []
+
     init(version: UInt32 = 3, tensorCount: UInt64 = 0) {
         self.version = version
         self.tensorCount = tensorCount
@@ -23,10 +31,14 @@ struct GGUFFixtureBuilder {
         out.append(contentsOf: Array("GGUF".utf8))
         out.appendLE(version)
         out.appendLE(tensorCount)
-        out.appendLE(UInt64(entries.count))
+        out.appendLE(UInt64(entries.count + rawEntries.count))
         for entry in entries {
             out.appendString(entry.key)
             out.appendValue(entry.value)
+        }
+        for entry in rawEntries {
+            out.appendString(entry.key)
+            out.append(entry.bytes)
         }
         return out
     }
@@ -66,6 +78,31 @@ struct GGUFFixtureBuilder {
     func with(_ key: String, array: [GGUFValue]) -> GGUFFixtureBuilder {
         var copy = self
         copy.entries.append((key, .array(array)))
+        return copy
+    }
+
+    /// A metadata value that is a chain of nested arrays `depth` levels deep.
+    ///
+    /// Each level is twelve bytes — a `u32` element type and a `u64` count — so
+    /// a megabyte of header buys tens of thousands of levels, and llama.cpp
+    /// emits no nested arrays at all. A file shaped like this is only ever
+    /// hostile.
+    ///
+    /// Written iteratively, for the reason given on `rawEntries`.
+    func withNestedArrayChain(_ key: String, depth: Int) -> GGUFFixtureBuilder {
+        var copy = self
+        var bytes = Data()
+        bytes.appendLE(UInt32(9))          // array
+        bytes.appendLE(UInt32(9))          // element type: array
+        bytes.appendLE(UInt64(1))          // one element
+        for _ in 0..<depth {
+            bytes.appendLE(UInt32(9))
+            bytes.appendLE(UInt64(1))
+        }
+        bytes.appendLE(UInt32(4))          // the innermost: one uint32
+        bytes.appendLE(UInt64(1))
+        bytes.appendLE(UInt32(1))
+        copy.rawEntries.append((key, bytes))
         return copy
     }
 
