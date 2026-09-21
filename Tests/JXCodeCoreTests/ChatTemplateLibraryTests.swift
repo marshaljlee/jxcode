@@ -359,12 +359,44 @@ final class ChatTemplateToolCallingTests: XCTestCase {
     {% endfor %}
     """
 
-    /// The opening of a real template that does handle tools.
+    /// A real template that handles tools in *both* halves: it reads the
+    /// `tools` variable, and it renders `tool_calls`. Either alone is not
+    /// enough — the first puts the definitions in front of the model, the
+    /// second is how a call comes back out.
     private let withTools = """
     {{- bos_token }}{%- if tools %}
     {%- set tool_definitions %}
     {{- "# Tools\n\nYou are provided with function signatures within <tools></tools> XML tags:" }}
     {%- for tool in tools %}
+    {{- "\n<tool>" + tool['function']['name'] + "</tool>" }}
+    {%- endfor %}
+    {%- endif %}
+    {%- for message in messages %}
+    {%- if message['role'] == 'assistant' and message['tool_calls'] %}
+    {{- '<｜tool╱calls╱begin｜>' }}
+    {%- for tool_call in message['tool_calls'] %}
+    {{- tool_call['function']['name'] + tool_call['function']['arguments'] }}
+    {%- endfor %}
+    {%- endif %}
+    {%- endfor %}
+    """
+
+    /// The template that exposed the bug, in the shape it actually has: 2,937
+    /// characters from a DeepSeek R1 fine-tune that render
+    /// `message['tool_calls']` in full and never mention `tools`. llama.cpp
+    /// reports `supports_tool_calls=true, supports_tools=false`, and an agent
+    /// asking for a tool gets prose, because the model was never told the tool
+    /// existed.
+    private let rendersCallsWithoutTools = """
+    {%- for message in messages %}
+    {%- if message['role'] == 'assistant' and message['tool_calls'] is defined %}
+    {%- for tool in message['tool_calls'] %}
+    {{ '<｜tool╱calls╱begin｜><｜tool╱call╱begin｜>' + tool['type'] + '<｜tool╱sep｜>'
+       + tool['function']['name'] + ' ' + '```json' + tool['function']['arguments'] + '```'
+       + '<｜tool╱call╱end｜>' }}
+    {%- endfor %}
+    {%- endif %}
+    {%- endfor %}
     """
 
     private func resolution(_ template: String?) -> ChatTemplateLibrary.Resolution {
@@ -403,15 +435,40 @@ final class ChatTemplateToolCallingTests: XCTestCase {
         XCTAssertNil(result.warning, "a working template must not produce a warning")
     }
 
-    func testOtherToolMarkersAreRecognised() {
-        // Templates vary in which of llama.cpp's fields they read.
+    func testTheEmitHalfAloneIsNotToolCalling() {
+        // Templates vary in which of llama.cpp's fields they read, and every
+        // one of these is enough to render a call the template is *handed*.
+        // None of them gets the tool definitions into the prompt, which is the
+        // half a model needs before it can decide to call anything.
         for marker in ["tool_calls", "tool_call_id", "tool_result", "function"] {
             let template = "{% if \(marker) %}...{% endif %}"
             XCTAssertEqual(
-                resolution(template).toolCalling, .supported,
-                "a template referencing '\(marker)' should count as handling tools"
+                resolution(template).toolCalling, .unsupported,
+                "a template referencing only '\(marker)' cannot receive tools"
             )
         }
+    }
+
+    func testBothHalvesTogetherAreRecognised() {
+        for marker in ["tool_calls", "tool_call_id", "tool_result"] {
+            let template = "{%- if tools %}{% for t in tools %}{{ t.name }}{% endfor %}{% endif %}"
+                + "{% if \(marker) %}...{% endif %}"
+            XCTAssertEqual(
+                resolution(template).toolCalling, .supported,
+                "a template reading 'tools' and '\(marker)' should count as handling tools"
+            )
+        }
+    }
+
+    /// The trap, in the shape a real file has. Reported as working by the old
+    /// search, because it renders `tool_calls` and speaks of `function` — and
+    /// it cannot call a tool at all.
+    func testATemplateThatRendersCallsButNeverReceivesThemIsNotToolCalling() {
+        let result = resolution(rendersCallsWithoutTools)
+
+        XCTAssertTrue(result.isResolved, "it resolves, which is what makes it dangerous")
+        XCTAssertEqual(result.toolCalling, .unsupported)
+        XCTAssertNotNil(result.warning, "the user should be told, not left to find out")
     }
 
     func testABuiltInPresetIsNotClaimedEitherWay() {
@@ -441,13 +498,27 @@ final class ChatTemplateToolCallingTests: XCTestCase {
         XCTAssertNil(result.warning)
     }
 
-    func testTheHeuristicIsBiasedTowardsSupported() {
-        // A false "unsupported" warns about a model that works, which is worse
-        // than staying quiet about one that does not — the runtime check
-        // against /props catches the latter anyway.
-        XCTAssertEqual(resolution("{% if tools %}x{% endif %}").toolCalling, .supported)
-        XCTAssertEqual(resolution("Tools available: {{ tools }}").toolCalling, .supported)
-        // But a template that merely uses the word inside a sentence about
+    func testBothHalvesAreRequired() {
+        // The bias used to run the other way — towards `supported` — on the
+        // reasoning that a false "unsupported" warns about a model that works,
+        // while the runtime check against /props catches the opposite. It does
+        // not catch it soon enough to help: the plan is what decides whether
+        // the user is warned at all, and by the time /props is read the agent
+        // is already sending tools to a model that cannot see them.
+        XCTAssertEqual(resolution("{% if tools %}{{ tool_calls }}{% endif %}").toolCalling, .supported)
+        // Reads the definitions but never emits a call.
+        XCTAssertEqual(resolution("{% if tools %}x{% endif %}").toolCalling, .unsupported)
+        XCTAssertEqual(resolution("Tools available: {{ tools }}").toolCalling, .unsupported)
+        // Emits a call but never reads the definitions.
+        XCTAssertEqual(resolution("{% if tool_calls %}x{% endif %}").toolCalling, .unsupported)
+        // Prose about functions is not a call. This is the opening of a real
+        // tool template with the emitting half removed — the word "function"
+        // appears in ordinary English there, which is why it is not evidence.
+        XCTAssertEqual(
+            resolution("{%- if tools %}You are provided with function signatures.{%- endif %}").toolCalling,
+            .unsupported
+        )
+        // A template that merely uses the word inside a sentence about
         // something else is a judgement call, and either answer is defensible.
         XCTAssertEqual(resolution("no tooling here").toolCalling, .unsupported)
     }

@@ -14,11 +14,15 @@ func makeModelInfo(
     headCount: Int? = 32,
     headCountKV: Int? = 8,
     // A realistic template, not a placeholder. Real chat templates mark roles
-    // and read the `tools` variable; the one-liner that used to be here had
-    // neither, so a fixture artefact looked like a property of the model and
-    // tripped the tool-calling check on tests that are about memory geometry.
+    // and handle tools in both halves — reading the `tools` variable so the
+    // definitions reach the model, and rendering `tool_calls` so a call comes
+    // back out. The one-liner that used to be here had neither, and the version
+    // after that had only the first; each time a fixture artefact looked like a
+    // property of the model and tripped the tool-calling check on tests that
+    // are about memory geometry.
     chatTemplate: String? = """
     {% for m in messages %}<|{{ m.role }}|>{{ m.content }}<|end|>
+    {% if m.tool_calls %}<tool_calls>{{ m.tool_calls }}</tool_calls>{% endif %}
     {% endfor %}{% if tools %}<tools>{{ tools }}</tools>{% endif %}
     """,
     fileType: GGMLFileType? = .mostlyQ8_0,

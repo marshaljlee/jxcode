@@ -228,30 +228,47 @@ public struct ChatTemplateLibrary: Sendable {
     /// Decide whether a Jinja chat template handles tools at all.
     ///
     /// A text search, which is a crude tool for the job — but the alternative
-    /// is rendering the template, and the question only needs a yes or no. A
-    /// template that supports tool calling has to read the `tools` variable
-    /// llama.cpp injects, or the `tool_calls` / `tool_call_id` fields it puts
-    /// on messages; there is no way to emit a structured call without
-    /// referencing one of them. So their absence is strong evidence, and their
-    /// presence — even in a branch this particular request never takes — is
-    /// enough to say the format exists.
+    /// is rendering the template, and the question only needs a yes or no.
     ///
-    /// Deliberately biased towards `supported`: a false "unsupported" would
-    /// warn about a model that works, which is worse than staying quiet about
-    /// one that does not, because the runtime check against `/props` catches
-    /// the latter anyway.
+    /// Tool calling is **two** halves, and a template can do one without the
+    /// other:
+    ///
+    /// * it has to *read* the `tools` variable llama.cpp injects, or the tool
+    ///   definitions never reach the model;
+    /// * it has to *emit* a call, which means rendering the `tool_calls` field
+    ///   llama.cpp puts on assistant messages.
+    ///
+    /// A template with only the second half is the trap, and it is not a rare
+    /// one. The DeepSeek R1 fine-tune on this machine ships 2,937 characters
+    /// that render `message['tool_calls']` in full — `tool['function']['name']`,
+    /// `<｜tool▁call▁begin｜>`, the arguments as fenced JSON — and never mention
+    /// `tools` at all. llama.cpp reports `supports_tool_calls=true,
+    /// supports_tools=false`, and the model answers an agent in prose, because
+    /// it was never told the tool existed. Two integration tests caught this by
+    /// asking for a tool and getting an essay about the weather.
+    ///
+    /// So both halves are required, which is also the question `/props` asks:
+    /// its `toolCallingIsUsable` is `supports_tools && supports_tool_calls`.
+    /// The prediction and the runtime check it is compared against now agree
+    /// about what "supports tool calling" means.
     static func toolCallingSupport(inTemplate template: String) -> ToolCallingSupport {
-        let markers = ["tool_calls", "tool_call", "tool_call_id", "tool_result", "function"]
         let lowered = template.lowercased()
-        if markers.contains(where: { lowered.contains($0) }) { return .supported }
-        // The bare `tools` variable, matched on word boundaries so that prose
-        // like "tools" inside a system prompt is not mistaken for the variable
-        // — though a template containing that word is far more likely to be
-        // handling it than not.
-        if lowered.range(of: #"\btools\b"#, options: .regularExpression) != nil {
-            return .supported
-        }
-        return .unsupported
+
+        // The input side. Matched on word boundaries so that prose — "tools"
+        // inside a system prompt — is not mistaken for the variable, though a
+        // template containing the word is far more likely to be handling it.
+        let injectsTools = lowered.range(of: #"\btools\b"#, options: .regularExpression) != nil
+
+        // The output side. Any one of these is enough; they are the field names
+        // llama.cpp puts on a message, so a template cannot render a call
+        // without naming one of them.
+        let emitsCalls = ["tool_calls", "tool_call", "tool_call_id", "tool_result"]
+            .contains(where: { lowered.contains($0) })
+
+        // `function` is deliberately *not* evidence. It names the wrong half —
+        // the shape of a call, which is precisely what the template above
+        // renders — and it is a word ordinary prose contains.
+        return injectsTools && emitsCalls ? .supported : .unsupported
     }
 
     /// The built-in preset for an architecture, or nil when there is no

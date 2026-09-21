@@ -281,7 +281,15 @@ final class RealModelReportTests: XCTestCase {
         )
 
         XCTAssertFalse(report.isEmpty)
-        XCTAssertTrue(report.contains("models,"), report)
+        // The headline counts what it found, so the expectation has to come
+        // from the corpus rather than from a fixed string: this machine has one
+        // readable model at the moment, and "models," was written when it had
+        // more than one.
+        let count = scan.models.count
+        XCTAssertTrue(
+            report.contains("\(count) model\(count == 1 ? "" : "s"),"),
+            report
+        )
         // Every model in the report must have produced a plan line, or the
         // optimiser failed silently on real metadata.
         for model in scan.models {
@@ -303,7 +311,26 @@ final class RealModelReportTests: XCTestCase {
 
         XCTAssertTrue(report.contains("llama-server -m"), report)
         XCTAssertTrue(report.contains("budget"), report)
-        // The real paths contain spaces, so the rendered command must quote them.
-        XCTAssertTrue(report.contains("'/Users/"), "real paths with spaces must be quoted:\n\(report)")
+        // The rendered command quotes a path exactly when the path needs it.
+        // Which case this is depends on the machine, not on the code: the one
+        // readable model here sits at a path with no spaces in it, so asking
+        // for a quote unconditionally demanded something the corpus no longer
+        // has. Both branches are worth checking — quoting a path that has no
+        // spaces is as wrong as leaving one unquoted that does.
+        if plan.modelPath.contains(" ") {
+            XCTAssertTrue(
+                report.contains("'\(plan.modelPath)'"),
+                "a path with spaces must be quoted:\n\(report)"
+            )
+        } else {
+            XCTAssertTrue(
+                report.contains(plan.modelPath),
+                "the model path should appear as it is:\n\(report)"
+            )
+            XCTAssertFalse(
+                report.contains("'\(plan.modelPath)'"),
+                "a path with no spaces must not be quoted:\n\(report)"
+            )
+        }
     }
 }

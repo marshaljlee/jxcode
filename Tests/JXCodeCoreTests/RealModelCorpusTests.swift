@@ -30,6 +30,13 @@ final class RealModelCorpusTests: XCTestCase {
     }
 
     /// The two models known to have a projector beside them on this machine.
+    ///
+    /// Only a model that is actually *there* says anything about the pairing
+    /// code. A name that is missing from the corpus means the file was moved,
+    /// deleted, or — as three of the four models here are right now — left
+    /// behind as a symlink whose blob is gone. Failing on that would blame the
+    /// scanner for something no code did, so the test skips instead and says
+    /// which files it looked for.
     private let knownVisionModels = ["Ornith-1.5 9B", "Qwen3.5-4B"]
 
     func testRealCorpusScansWithoutError() throws {
@@ -57,7 +64,16 @@ final class RealModelCorpusTests: XCTestCase {
         let scan = try requireCorpus()
         let vision = scan.models.filter(\.hasVision)
 
-        for name in knownVisionModels {
+        let present = knownVisionModels.filter { name in
+            scan.models.contains { $0.model.filename.contains(name) }
+        }
+        try XCTSkipUnless(
+            !present.isEmpty,
+            "none of \(knownVisionModels.joined(separator: ", ")) are in ~/Models — "
+                + "an unreadable file is not in the scan, so there is no pairing to check"
+        )
+
+        for name in present {
             let match = vision.first { $0.model.filename.contains(name) }
             XCTAssertNotNil(match, "\(name) should have been paired with its mmproj")
 
