@@ -79,7 +79,7 @@ public extension JSONValue {
     }
 
     var intValue: Int? {
-        numberValue.map { Int($0) }
+        numberValue.flatMap { Int(safelyTruncating: $0) }
     }
 
     var arrayValue: [JSONValue]? {
@@ -132,11 +132,41 @@ public extension JSONValue {
             if let content = object["content"] { return content.flattenedText }
             return jsonString()
         case .number(let value):
-            return value == value.rounded() ? String(Int(value)) : String(value)
+            // A whole number is written without a fractional part, so
+            // `--top-k 1.0` does not look like a mistake. Except when the
+            // number cannot be an `Int` at all: `1e999` decodes to infinity and
+            // `Int(infinity)` is a hard crash, so those fall through to the
+            // plain `Double` rendering rather than taking the process down.
+            if value == value.rounded(), let whole = Int(safelyTruncating: value) {
+                return String(whole)
+            }
+            return String(value)
         case .bool(let value):
             return String(value)
         case .null:
             return ""
         }
+    }
+}
+
+// MARK: - Numbers off the wire
+
+public extension Int {
+
+    /// `Int(_:)` on a `Double` traps — on infinity, on NaN, and on any finite
+    /// value outside `Int`'s range. A decoded JSON number guarantees none of
+    /// those. `1e999` decodes to `.infinity`, and both the sources of a decoded
+    /// number are outside our control: a local model server filling in a
+    /// `/props` response, and a model filling in a tool-call argument.
+    ///
+    /// Same truncation as `Int(_:)`, with the trap turned into a `nil`.
+    /// `SamplingPreset.scalar` carries the equivalent guard inline, with a
+    /// magnitude bound of its own because it is formatting for a command line;
+    /// anything reading a number off the wire belongs here.
+    init?(safelyTruncating value: Double) {
+        // Rounding first makes the value whole, so `exactly:` is deciding
+        // finiteness and range rather than rejecting 3.7 as inexact.
+        guard let whole = Int(exactly: value.rounded(.towardZero)) else { return nil }
+        self = whole
     }
 }

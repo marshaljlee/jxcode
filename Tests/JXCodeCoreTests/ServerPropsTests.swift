@@ -70,6 +70,24 @@ final class ServerPropsTests: XCTestCase {
         XCTAssertFalse(props.isSleeping)
     }
 
+    /// An `n_ctx` that fits a `Double` but not an `Int`.
+    ///
+    /// `Int(_:)` on a `Double` traps on anything outside `Int`'s range, and
+    /// `n_ctx` comes from the server's own `/props` response — so a build that
+    /// reports an absurd context length used to take the app down rather than
+    /// read as "no answer". A value too large for a `Double` at all, like
+    /// `1e999`, is rejected by the decoder before it reaches the conversion;
+    /// this is the size that gets through.
+    func testAnOutOfRangeContextDecodesAsNoAnswerRatherThanTrapping() throws {
+        let props = try XCTUnwrap(decode("""
+        {"default_generation_settings": {"n_ctx": 1e30}, "total_slots": 1e30}
+        """))
+
+        XCTAssertNil(props.contextLength)
+        XCTAssertNil(props.totalSlots)
+        XCTAssertNil(props.agentContextLength)
+    }
+
     func testContextIsReadFromDefaultGenerationSettingsNotTheRoot() throws {
         // `n_ctx` is nested. Looking for it at the root yields nil, which reads
         // as "the server did not say" rather than "we looked in the wrong
