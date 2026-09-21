@@ -880,6 +880,83 @@ final class IsolationProofTests: XCTestCase {
     func testZdotdirIsSandboxLocal() throws {
         XCTAssertEqual(try shell("print -n $ZDOTDIR"), sandbox.paths.zshDir.path)
     }
+
+    /// Host binaries under the real home are the ones a deny list misses.
+    ///
+    /// `~/.local/bin`, `~/.cargo/bin`, `~/.bun/bin`, `~/.volta/bin`,
+    /// `~/.asdf/shims`, `~/Library/pnpm` and every nvm version directory hold
+    /// host toolchains. They cannot be enumerated — a new runtime appears every
+    /// year — so the rule has to be the directory rather than a list of names.
+    ///
+    /// The directories do not have to exist: this is a string filter on `PATH`,
+    /// and asserting against the real home is the point.
+    func testHostToolDirectoriesUnderTheRealHomeAreStripped() throws {
+        let realHome = NSHomeDirectory()
+        let hostile = [
+            "\(realHome)/.local/bin",
+            "\(realHome)/.cargo/bin",
+            "\(realHome)/.bun/bin",
+            "\(realHome)/.volta/bin",
+            "\(realHome)/.asdf/shims",
+            "\(realHome)/Library/pnpm",
+            "\(realHome)/.nvm/versions/node/v20.11.0/bin",
+        ]
+        let list = hostile.map { "'\($0)'" }.joined(separator: " ")
+        let entries = try shell("path=( \(list) '/usr/bin' ); _jx_assert_path; print -n $PATH")
+            .split(separator: ":").map(String.init)
+
+        for directory in hostile {
+            XCTAssertFalse(entries.contains(directory), "\(directory) survived the re-assert")
+        }
+        XCTAssertTrue(entries.contains("/usr/bin"), "system entries must survive")
+    }
+
+    /// macOS reaches the same directory through `/Users/name` and
+    /// `/System/Volumes/Data/Users/name`, so the comparison is made after
+    /// resolving symlinks.
+    func testARealHomeReachedThroughASymlinkIsStillStripped() throws {
+        let link = root.appendingPathComponent("link-to-home")
+        try FileManager.default.createSymbolicLink(
+            atPath: link.path,
+            withDestinationPath: NSHomeDirectory()
+        )
+        let throughLink = "\(link.path)/.local/bin"
+
+        let entries = try shell("path=( '\(throughLink)' '/usr/bin' ); _jx_assert_path; print -n $PATH")
+            .split(separator: ":").map(String.init)
+
+        XCTAssertFalse(entries.contains(throughLink), "\(throughLink) survived the re-assert")
+    }
+
+    /// In production the sandbox lives *under* the real home, so "strip
+    /// everything under the real home" strips the sandbox's own entries too.
+    /// They are re-prepended from `$_JX_PRE`, which is what keeps the rule from
+    /// being self-defeating — and this is the arrangement that matters, so it
+    /// gets its own test rather than being assumed.
+    func testSandboxEntriesSurviveStrippingWhenTheyLiveUnderTheRealHome() throws {
+        let hostHome = root.appendingPathComponent("host-home")
+        let nestedPaths = SandboxPaths(root: hostHome.appendingPathComponent("JXCode"))
+        let nested = Sandbox(paths: nestedPaths)
+        try nested.prepare()
+        // Re-install with a real home that is an ancestor of the sandbox root.
+        try ShellInit.install(paths: nestedPaths, realHome: hostHome.path)
+
+        let result = try nested.run("/bin/zsh", arguments: ["-lc", "path=( '/usr/bin' ); _jx_assert_path; print -n $PATH"])
+        XCTAssertTrue(result.succeeded, "command failed (\(result.exitCode)): \(result.combined)")
+
+        let entries = result.combined
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(separator: ":").map(String.init)
+
+        XCTAssertEqual(
+            entries.first, nestedPaths.bin.path,
+            "sandbox bin must be re-prepended even though it lies under the real home"
+        )
+        XCTAssertFalse(
+            entries.contains(hostHome.appendingPathComponent(".local/bin").path),
+            "a host tool directory beside the sandbox survived"
+        )
+    }
 }
 
 // MARK: - Router environment, proved dynamically

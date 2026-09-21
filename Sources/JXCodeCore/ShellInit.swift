@@ -125,10 +125,29 @@ _jx_assert_path() {
   local -a blocked
   blocked=( ${_JX_PRE[@]} ${_JX_DENY[@]} )
 
+  # The one directory that cannot be enumerated. ~/.local/bin, ~/.cargo/bin,
+  # ~/.bun/bin, ~/.volta/bin, ~/.asdf/shims, ~/Library/pnpm and every nvm
+  # version directory all hold host binaries, and a new runtime appears every
+  # year — so the rule is the directory, not a list of names.
+  #
+  # `:A` resolves symlinks first: on macOS the same place is reachable as both
+  # /Users/name and /System/Volumes/Data/Users/name.
+  #
+  # The sandbox normally lives *under* the real home, so this strips the
+  # sandbox's own entries too. They are re-prepended from $_JX_PRE below, which
+  # is what makes the rule safe rather than self-defeating.
+  local real="${JXCODE_REAL_HOME:A}"
+
   local -a keep
   local entry candidate skip
   keep=()
   for entry in ${path[@]}; do
+    if [[ -n "$real" ]]; then
+      local resolved="${entry:A}"
+      if [[ "$resolved" == "$real" || "$resolved" == "$real"/* ]]; then
+        continue
+      fi
+    fi
     skip=0
     for candidate in ${blocked[@]}; do
       if [[ "$entry" == "$candidate" ]]; then
