@@ -329,7 +329,7 @@ public struct ModelOptimizer: Sendable {
                     chosenCache = chosenCache ?? cache
                     continue
                 }
-                let cacheBytes = UInt64(perToken * Double(context))
+                let cacheBytes = UInt64(saturating: perToken * Double(context))
                 if cacheBytes <= availableForCache {
                     chosenContext = context
                     chosenCache = cache
@@ -355,15 +355,28 @@ public struct ModelOptimizer: Sendable {
         let context = chosenContext!
         let cacheType = chosenCache!
         let kvPerToken = info?.kvBytesPerToken(bytesPerElement: cacheType.bytesPerElement) ?? 0
-        let kvBytes = UInt64(kvPerToken * Double(context))
+        let kvBytes = UInt64(saturating: kvPerToken * Double(context))
 
         // Layer offload. With unified memory, if it fits it all goes on the GPU.
         let layers = info?.blockCount ?? 0
         var gpuLayers = layers
-        if layers > 0, fixed &+ kvBytes > budget {
-            let room = budget > (compute &+ projector) ? budget - compute - projector : 0
-            let fraction = weights > 0 ? Double(room) / Double(weights) : 0
-            gpuLayers = max(0, min(layers, Int(Double(layers) * fraction)))
+        // The sum is added with overflow reported, not `&+`. A wrapped sum
+        // reads as *small*, so `fixed &+ kvBytes > budget` silently answers
+        // "it fits" for a cache estimate of `UInt64.max` — skipping the
+        // offload path entirely for exactly the geometry that needs it most.
+        let spent = fixed.addingReportingOverflow(kvBytes)
+        if layers > 0, spent.overflow || spent.partialValue > budget {
+            let room = Self.remaining(budget: budget, after: [compute, projector])
+            // Clamped to 1: this is the fraction of the weights that fit, so a
+            // value above 1 is arithmetic rather than a finding — and with a
+            // crafted `block_count` it pushes the product below past `Int.max`.
+            //
+            // The conversion is guarded too. `Double(Int.max)` rounds *up* to
+            // 2^63, one past the largest `Int`, so `layers == Int.max` with a
+            // fraction of exactly 1 traps even after the clamp.
+            let fraction = weights > 0 ? min(1, Double(room) / Double(weights)) : 0
+            let fitting = Int(safelyTruncating: Double(layers) * fraction) ?? layers
+            gpuLayers = max(0, min(layers, fitting))
             warnings.append(
                 "Only about \(gpuLayers) of \(layers) layers fit in the memory budget. Partial "
                     + "offload does not start on this llama.cpp build, so all \(layers) are "
@@ -375,7 +388,7 @@ public struct ModelOptimizer: Sendable {
         // Metal it is faster anyway, so it is on regardless.
         let flashAttention = true
 
-        let headroom = budget > (fixed &+ kvBytes) ? budget - fixed - kvBytes : 0
+        let headroom = Self.remaining(budget: budget, after: [fixed, kvBytes])
         let tight = Double(headroom) / Double(max(budget, 1)) < 0.15
 
         // A smaller micro-batch shrinks the compute buffer, which is the largest
@@ -627,6 +640,27 @@ public struct ModelOptimizer: Sendable {
         return unique.isEmpty ? [4_096] : unique
     }
 
+    // MARK: Sizes read from a header
+
+    /// What is left of a budget once these parts are paid for, or 0 when the
+    /// answer would be negative.
+    ///
+    /// Not `budget > (a &+ b) ? budget - a - b : 0`. The comparison there sees
+    /// the *wrapped* sum, so a sum that overflowed reads as small, the guard
+    /// passes, and the subtraction that follows underflows — which traps. Two
+    /// things make it reachable rather than theoretical: a crafted header can
+    /// make one estimate here `UInt64.max`, and the saturation that keeps the
+    /// estimate from trapping is what makes the sum overflow.
+    private static func remaining(budget: UInt64, after parts: [UInt64]) -> UInt64 {
+        var spent: UInt64 = 0
+        for part in parts {
+            let (sum, overflow) = spent.addingReportingOverflow(part)
+            if overflow { return 0 }
+            spent = sum
+        }
+        return budget > spent ? budget - spent : 0
+    }
+
     private func contextReason(
         context: Int,
         trained: Int?,
@@ -642,5 +676,34 @@ public struct ModelOptimizer: Sendable {
         }
         return "reduced from the trained \(trained / 1024)k to \(context / 1024)k so the cache "
             + "(\(size)) fits in memory"
+    }
+}
+
+
+// MARK: - Sizes read from a file
+
+extension UInt64 {
+
+    /// `UInt64(_:)` on a `Double` traps — on a negative value, on infinity, on
+    /// NaN, and on anything past `UInt64.max`. Both operands here come out of a
+    /// GGUF header: `block_count` and the head counts give the per-token cost,
+    /// and `context_length` gives the multiplier. `intValue` already refuses
+    /// values above `Int.max` rather than trapping, so a header can legitimately
+    /// declare a `block_count` near `Int.max` — and one such value makes this
+    /// product exceed `UInt64.max` at a context length no model has ever used.
+    ///
+    /// Saturating rather than `nil`, because this feeds a size estimate: an
+    /// absurd answer means "does not fit", which the planner already knows how
+    /// to say.
+    ///
+    /// Deliberately *not* a judgement about whether the geometry is plausible.
+    /// `block_count` grows with model size, and any cap invented here could
+    /// reject a real model — the guarantee offered is only that no file can make
+    /// this arithmetic trap.
+    init(saturating value: Double) {
+        if value.isNaN { self = .max; return }   // unknown, so "does not fit"
+        if value <= 0 { self = 0; return }       // negatives, and -inf
+        if value >= Double(UInt64.max) { self = .max; return }
+        self = UInt64(value)
     }
 }

@@ -208,6 +208,70 @@ final class ModelOptimizerTests: XCTestCase {
         )
     }
 
+    // MARK: Geometry only a crafted header would declare
+
+    /// A `block_count` near `Int.max` makes the per-token cache cost exceed
+    /// `UInt64.max` at *any* context length, and `UInt64(_:)` traps on that.
+    ///
+    /// `GGUFValue.intValue` refuses values above `Int.max` rather than trapping,
+    /// so this geometry reaches the planner honestly: the header declared it and
+    /// nothing rejected it. The planner's job is to survive it.
+    func testAnAbsurdBlockCountDoesNotTrap() {
+        let plan = plan(optimizer(), info: makeModelInfo(blockCount: Int.max))
+
+        XCTAssertTrue(
+            plan.warnings.contains { $0.contains("does not fit") },
+            "an unloadable model should say so rather than crash, got \(plan.warnings)"
+        )
+    }
+
+    /// The partial-offload path has to stay reachable with absurd geometry.
+    ///
+    /// It is guarded by a sum that used to be computed with `&+`. A cache
+    /// estimate of `UInt64.max` wraps to something small, so the guard read
+    /// "it fits" and skipped the warning for precisely the model that needs
+    /// it — and took the layer arithmetic below it out of reach with it.
+    func testAbsurdGeometryStillReportsPartialOffload() {
+        let plan = plan(optimizer(), info: makeModelInfo(blockCount: Int.max))
+
+        XCTAssertTrue(
+            plan.warnings.contains { $0.contains("layers fit in the memory budget") },
+            "\(plan.warnings)"
+        )
+    }
+
+    /// The same trap through the other operand: a trained context near
+    /// `Int.max`, which multiplies even ordinary geometry past `UInt64.max`.
+    func testAnAbsurdTrainedContextDoesNotTrap() {
+        let plan = plan(optimizer(), info: makeModelInfo(contextLength: Int.max))
+
+        XCTAssertFalse(plan.warnings.isEmpty, "expected the plan to explain itself")
+    }
+
+    /// Both at once, and still a plan rather than a crash.
+    func testAbsurdGeometryAcrossTheBoardStillProducesAPlan() {
+        let plan = plan(
+            optimizer(),
+            info: makeModelInfo(contextLength: Int.max, blockCount: Int.max, embeddingLength: Int.max)
+        )
+        XCTAssertFalse(plan.warnings.isEmpty)
+    }
+
+    func testSaturatingConversionMatchesUInt64WhereUInt64DoesNotTrap() {
+        XCTAssertEqual(UInt64(saturating: 0), 0)
+        XCTAssertEqual(UInt64(saturating: 42), 42)
+        XCTAssertEqual(UInt64(saturating: 42.7), 42, "same truncation as UInt64(_:)")
+        XCTAssertEqual(UInt64(saturating: 1e18), 1_000_000_000_000_000_000)
+    }
+
+    func testSaturatingConversionClampsWhereUInt64Traps() {
+        XCTAssertEqual(UInt64(saturating: .infinity), .max)
+        XCTAssertEqual(UInt64(saturating: 1e30), .max)
+        XCTAssertEqual(UInt64(saturating: -1), 0)
+        XCTAssertEqual(UInt64(saturating: -.infinity), 0)
+        XCTAssertEqual(UInt64(saturating: .nan), .max, "unknown size, so does not fit")
+    }
+
     // MARK: Fit
 
     func testFullContextIsUsedWhenItFits() throws {
