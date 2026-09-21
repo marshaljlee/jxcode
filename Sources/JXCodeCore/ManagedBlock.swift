@@ -62,27 +62,37 @@ public enum ManagedBlock {
     /// one with it, on whichever side the block sits. Anything further is the
     /// user's and stays. The result keeps its trailing newline, so callers must
     /// **not** append one.
+    ///
+    /// The line endings survive as well. Lines are split with their terminator
+    /// attached and put back with nothing between them, so a CRLF file comes
+    /// back CRLF and one that mixes the two comes back mixed. Splitting on
+    /// `"\n"` and rejoining with `"\n"` converted all of it.
     public static func removingPreservingShape(from text: String, markers: Markers) -> String {
         guard text.contains(markers.start) else { return text }
 
-        var lines = text.replacingOccurrences(of: "\r\n", with: "\n")
-            .components(separatedBy: "\n")
-        guard let start = lines.firstIndex(where: { $0.contains(markers.start) }),
-              let end = lines.firstIndex(where: { $0.contains(markers.end) }),
+        var lines = TextLines.split(text)
+        guard let start = lines.firstIndex(where: {
+                  TextLines.content(of: $0).contains(markers.start)
+              }),
+              let end = lines.firstIndex(where: {
+                  TextLines.content(of: $0).contains(markers.end)
+              }),
               start <= end
         else { return text }
 
         var lower = start
         var upper = end
-        if lower > 0, lines[lower - 1].trimmingCharacters(in: .whitespaces).isEmpty {
+        if lower > 0,
+           TextLines.content(of: lines[lower - 1]).trimmingCharacters(in: .whitespaces).isEmpty {
             lower -= 1
         } else if upper + 1 < lines.count,
-                  lines[upper + 1].trimmingCharacters(in: .whitespaces).isEmpty {
+                  TextLines.content(of: lines[upper + 1])
+                      .trimmingCharacters(in: .whitespaces).isEmpty {
             upper += 1
         }
 
         lines.removeSubrange(lower...upper)
-        return lines.joined(separator: "\n")
+        return TextLines.join(lines)
     }
 
     /// Put `block` at the top of `text`, replacing any previous block.
@@ -96,12 +106,15 @@ public enum ManagedBlock {
         into text: String,
         markers: Markers
     ) -> String {
+        // Separated the way the file already is. The block itself is ours and
+        // keeps the endings it was generated with.
+        let newline = TextLines.terminator(of: text)
         let body = removingPreservingShape(from: text, markers: markers)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if body.isEmpty {
-            return block + "\n"
+            return block + newline
         }
-        return block + "\n\n" + body + "\n"
+        return block + newline + newline + body + newline
     }
 
     /// Put `block` at the end of `text`, replacing any previous block.
@@ -115,12 +128,13 @@ public enum ManagedBlock {
         to text: String,
         markers: Markers
     ) -> String {
+        let newline = TextLines.terminator(of: text)
         let body = removingPreservingShape(from: text, markers: markers)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if body.isEmpty {
-            return block + "\n"
+            return block + newline
         }
-        return body + "\n\n" + block + "\n"
+        return body + newline + newline + block + newline
     }
 }
 

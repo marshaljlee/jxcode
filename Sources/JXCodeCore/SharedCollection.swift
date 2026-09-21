@@ -101,7 +101,8 @@ public struct Skill: Codable, Identifiable, Hashable, Sendable {
         lines.append("---")
         lines.append("")
         lines.append(body)
-        return lines.joined(separator: "\n") + "\n"
+        let newline = TextLines.terminator(of: body)
+        return lines.joined(separator: newline) + newline
     }
 
     /// Read a `SKILL.md`, deriving the display name and summary when the
@@ -137,40 +138,41 @@ public struct Skill: Codable, Identifiable, Hashable, Sendable {
     /// of surface area for a config file whose worst case is a missing
     /// description.
     static func splitFrontmatter(_ text: String) -> ([String: String], String) {
-        let normalised = text.replacingOccurrences(of: "\r\n", with: "\n")
-        var lines = normalised.components(separatedBy: "\n")
+        var lines = TextLines.split(text)
 
         // Skip a leading blank line or a BOM before the opening fence, or a
         // file that is otherwise fine reads as having no frontmatter at all.
-        while let first = lines.first, first.trimmingCharacters(in: .whitespaces).isEmpty {
+        while let first = lines.first,
+              TextLines.content(of: first).trimmingCharacters(in: .whitespaces).isEmpty {
             lines.removeFirst()
         }
         guard let opening = lines.first,
-              opening.trimmingCharacters(in: .whitespaces) == "---"
-        else { return ([:], normalised) }
+              TextLines.content(of: opening).trimmingCharacters(in: .whitespaces) == "---"
+        else { return ([:], text) }
 
         guard let closing = lines.dropFirst().firstIndex(where: {
-            $0.trimmingCharacters(in: .whitespaces) == "---"
+            TextLines.content(of: $0).trimmingCharacters(in: .whitespaces) == "---"
         }) else {
             // An unterminated fence. Treat the whole file as body rather than
             // swallowing it — a skill whose content vanished is worse than one
             // whose frontmatter did.
-            return ([:], normalised)
+            return ([:], text)
         }
 
         var pairs: [String: String] = [:]
         for line in lines[1..<closing] {
-            guard let colon = line.firstIndex(of: ":") else { continue }
-            let key = String(line[line.startIndex..<colon])
+            let content = TextLines.content(of: line)
+            guard let colon = content.firstIndex(of: ":") else { continue }
+            let key = String(content[content.startIndex..<colon])
                 .trimmingCharacters(in: .whitespaces)
                 .lowercased()
-            let value = String(line[line.index(after: colon)...])
+            let value = String(content[content.index(after: colon)...])
                 .trimmingCharacters(in: .whitespaces)
             guard !key.isEmpty else { continue }
             pairs[key] = unquote(value)
         }
 
-        let body = lines[(closing + 1)...].joined(separator: "\n")
+        let body = TextLines.join(Array(lines[(closing + 1)...]))
         return (pairs, body)
     }
 

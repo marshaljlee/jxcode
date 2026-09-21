@@ -259,6 +259,28 @@ final class SharedCollectionTests: XCTestCase {
         XCTAssertTrue(skill.body.contains("# Still here"))
     }
 
+    /// A skill written on Windows, or by an editor set to CRLF, must come back
+    /// that way — the body is the user's, and rewriting it is the same bug as
+    /// rewriting an `AGENTS.md`.
+    func testACRLFSkillKeepsItsLineEndings() {
+        let text = "---\r\nname: Demo\r\ndescription: A demo\r\n---\r\n\r\n# Demo\r\n\r\nBody text.\r\n"
+        let skill = Skill.parse(id: "demo", text: text, enabled: true, updatedAt: at(2026, 9, 21, 9, 0))
+
+        XCTAssertEqual(skill.name, "Demo")
+        XCTAssertEqual(skill.summary, "A demo")
+        XCTAssertTrue(skill.body.contains("\r\n"), "the body lost its CRLF")
+
+        let rendered = skill.rendered()
+        XCTAssertFalse(
+            rendered.replacingOccurrences(of: "\r\n", with: "").contains("\n"),
+            "the rendered skill mixes terminators: \(rendered.debugDescription)"
+        )
+        XCTAssertEqual(
+            Skill.parse(id: "demo", text: rendered, enabled: true, updatedAt: at(2026, 9, 21, 9, 0)).body,
+            skill.body
+        )
+    }
+
     // MARK: - The store
 
     func testWritingASkillCreatesItsFileAndSidecar() throws {

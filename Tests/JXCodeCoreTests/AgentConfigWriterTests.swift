@@ -433,6 +433,40 @@ final class AgentConfigWriterTests: XCTestCase {
         XCTAssertEqual(config.components(separatedBy: "[mcp_servers.files]").count - 1, 1)
     }
 
+    /// The "byte for byte" promise, on a file that has line endings to lose: a
+    /// bind followed by a revert must return the user's `config.toml` unchanged.
+    func testACRLFConfigComesBackByteForByte() throws {
+        try FileManager.default.createDirectory(at: paths.codexHome, withIntermediateDirectories: true)
+        let file = paths.codexHome.appendingPathComponent("config.toml")
+        let original = "approval_policy = \"never\"\r\n\r\n[mcp_servers.files]\r\ncommand = \"npx\"\r\n"
+        try original.write(to: file, atomically: true, encoding: .utf8)
+
+        _ = try AgentConfigWriter.apply(
+            agents: AgentRegistry.builtIns, paths: paths, routerURL: routerURL, model: "m"
+        )
+        XCTAssertTrue(try codexConfig().contains("\r\n"), "the bind converted the file to LF")
+
+        _ = try AgentConfigWriter.revert(agents: AgentRegistry.builtIns, paths: paths)
+        XCTAssertEqual(try codexConfig(), original)
+    }
+
+    /// Commenting a clashing key out and restoring it is a rewrite of the
+    /// user's own lines, so their terminators have to survive both directions.
+    func testCommentingOutAndRestoringPreservesCRLF() {
+        let original = "model = \"gpt-5\"\r\napproval_policy = \"never\"\r\n"
+        var notes: [String] = []
+
+        let commented = AgentConfigWriter.commentOutConflictingTopLevelKeys(
+            in: original, keys: ["model"], notes: &notes
+        )
+        XCTAssertTrue(commented.hasPrefix("# model"), "the clashing key was not commented out")
+        XCTAssertTrue(commented.contains("\r\n"), "the comment was written with LF")
+
+        XCTAssertEqual(
+            AgentConfigWriter.restoreCommentedOutTopLevelKeys(in: commented), original
+        )
+    }
+
     /// The block must come before any `[table]` header, or its top-level keys
     /// would land inside that table.
     func testManagedBlockPrecedesAnyTableHeader() throws {

@@ -512,9 +512,11 @@ public enum AgentConfigWriter {
         // The block goes first: top-level keys must precede any `[table]`
         // header, and a user file usually ends with one.
         let trimmedBody = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Separated the way the file already is; the block itself is ours.
+        let newline = TextLines.terminator(of: existing)
         let rendered = trimmedBody.isEmpty
-            ? block + "\n"
-            : block + "\n\n" + trimmedBody + "\n"
+            ? block + newline
+            : block + newline + newline + trimmedBody + newline
 
         if let current = try? String(contentsOf: file, encoding: .utf8), current == rendered {
             return Report(
@@ -554,9 +556,13 @@ public enum AgentConfigWriter {
     static func removeManagedBlockPreservingShape(from text: String) -> String {
         guard text.contains(blockStart) else { return text }
 
-        var lines = text.components(separatedBy: "\n")
-        guard let start = lines.firstIndex(where: { $0.contains(blockStart) }),
-              let end = lines.firstIndex(where: { $0.contains(blockEnd) }),
+        var lines = TextLines.split(text)
+        guard let start = lines.firstIndex(where: {
+                  TextLines.content(of: $0).contains(blockStart)
+              }),
+              let end = lines.firstIndex(where: {
+                  TextLines.content(of: $0).contains(blockEnd)
+              }),
               start <= end
         else { return text }
 
@@ -565,12 +571,12 @@ public enum AgentConfigWriter {
         // lines are the user's and stay put.
         var last = end
         if last + 1 < lines.count,
-           lines[last + 1].trimmingCharacters(in: .whitespaces).isEmpty {
+           TextLines.content(of: lines[last + 1]).trimmingCharacters(in: .whitespaces).isEmpty {
             last += 1
         }
 
         lines.removeSubrange(start...last)
-        return lines.joined(separator: "\n")
+        return TextLines.join(lines)
     }
 
     /// Comment out top-level assignments that would clash with the managed block.
@@ -590,8 +596,10 @@ public enum AgentConfigWriter {
         var inSection = false
         var commented = 0
 
-        for line in text.components(separatedBy: "\n") {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
+        for line in TextLines.split(text) {
+            let content = TextLines.content(of: line)
+            let ending = String(line.dropFirst(content.count))
+            let trimmed = content.trimmingCharacters(in: .whitespaces)
 
             if trimmed.hasPrefix("[") { inSection = true }
 
@@ -602,7 +610,7 @@ public enum AgentConfigWriter {
                     return rest.hasPrefix("=")
                 }
                 if isConflict {
-                    output.append("# \(line)   \(supersededMarker)")
+                    output.append("# \(content)   \(supersededMarker)" + ending)
                     commented += 1
                     continue
                 }
@@ -613,7 +621,7 @@ public enum AgentConfigWriter {
         if commented > 0 {
             notes.append("commented out \(commented) conflicting top-level key(s) — restore them to stop using the router")
         }
-        return output.joined(separator: "\n")
+        return TextLines.join(output)
     }
 
     /// Undo `commentOutConflictingTopLevelKeys`.
@@ -633,17 +641,19 @@ public enum AgentConfigWriter {
         let suffix = "   " + supersededMarker
         var output: [String] = []
 
-        for line in text.components(separatedBy: "\n") {
-            guard line.hasPrefix("# "), line.hasSuffix(suffix) else {
+        for line in TextLines.split(text) {
+            let content = TextLines.content(of: line)
+            let ending = String(line.dropFirst(content.count))
+            guard content.hasPrefix("# "), content.hasSuffix(suffix) else {
                 output.append(line)
                 continue
             }
             // `# ` in front, the marker behind: what is left is the line as the
             // user wrote it, indentation and all.
-            output.append(String(line.dropFirst(2).dropLast(suffix.count)))
+            output.append(String(content.dropFirst(2).dropLast(suffix.count)) + ending)
         }
 
-        return output.joined(separator: "\n")
+        return TextLines.join(output)
     }
 
     /// Minimal TOML string escaping. Enough for model names and URLs.
