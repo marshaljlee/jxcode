@@ -267,10 +267,44 @@ public final class ModelRouter: @unchecked Sendable {
 
     private let listenerQueue = DispatchQueue(label: "app.jxcode.router.listener")
     private let session: URLSession
-    private var listener: NWListener?
 
-    public private(set) var port: UInt16 = 0
-    public private(set) var isRunning = false
+    /// One lock around all three lifecycle fields, not one lock each.
+    ///
+    /// They describe a single state — either the router is listening on a known
+    /// port, or it is not listening at all — so guarding them separately would
+    /// let a reader take a port from one generation and a listener from the
+    /// next. They used to be plain `var`s on an `@unchecked Sendable` class,
+    /// written by `start`/`stop` on whatever thread called them and read from
+    /// connection tasks (`/health` reports the port) and from the UI
+    /// (`baseURL`). On a non-atomic type that is undefined behaviour, not
+    /// merely a stale read.
+    private let lifecycleLock = NSLock()
+    private var _listener: NWListener?
+    private var _port: UInt16 = 0
+    private var _isRunning = false
+
+    /// A start that has claimed the router but not yet bound.
+    ///
+    /// Separate from `_isRunning` so that `isRunning` keeps its meaning —
+    /// listening, right now — and a bind that is still in flight does not read
+    /// as running. It is what serialises two concurrent `start()` calls; a
+    /// `guard` on `_isRunning` alone would let both past, because neither sets
+    /// it until its bind completes.
+    private var _claiming = false
+
+    /// The port the listener is bound to, or 0 before the first successful
+    /// `start()`.
+    public var port: UInt16 {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        return _port
+    }
+
+    public var isRunning: Bool {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        return _isRunning
+    }
 
     public init(
         state: RouterState,
@@ -300,7 +334,11 @@ public final class ModelRouter: @unchecked Sendable {
     /// boundary by itself — every other process running as this user can reach
     /// it — which is what `RouterAuth` is for.
     public func start(preferredPort: UInt16 = RouterConfiguration.defaultPort) throws {
-        guard !isRunning else { throw RouterError.alreadyRunning(port) }
+        // Claimed before the bind rather than after it, so a second concurrent
+        // `start()` is refused instead of binding a port it will then have to
+        // give back. Released by `abandonStart()` if the bind does not
+        // complete, which is the path a failed start takes.
+        try claimStart()
 
         let parameters = NWParameters.tcp
         parameters.allowLocalEndpointReuse = true
@@ -309,8 +347,13 @@ public final class ModelRouter: @unchecked Sendable {
             port: NWEndpoint.Port(rawValue: preferredPort) ?? .any
         )
 
-        let listener = try NWListener(using: parameters)
-        self.listener = listener
+        let listener: NWListener
+        do {
+            listener = try NWListener(using: parameters)
+        } catch {
+            abandonStart()
+            throw error
+        }
 
         listener.newConnectionHandler = { [weak self] connection in
             self?.accept(connection)
@@ -339,25 +382,70 @@ public final class ModelRouter: @unchecked Sendable {
         // bound port before they can write it into an agent's environment.
         if ready.wait(timeout: .now() + 5) == .timedOut {
             listener.cancel()
-            self.listener = nil
+            abandonStart()
             throw RouterError.upstream("listener did not become ready within 5s")
         }
         if let startError {
             listener.cancel()
-            self.listener = nil
+            abandonStart()
             throw RouterError.upstream("\(startError)")
         }
 
-        port = listener.port?.rawValue ?? preferredPort
-        isRunning = true
-        log.write("router listening on http://127.0.0.1:\(port)")
+        let bound = listener.port?.rawValue ?? preferredPort
+        commitStart(port: bound, listener: listener)
+        log.write("router listening on http://127.0.0.1:\(bound)")
     }
 
     public func stop() {
-        listener?.cancel()
-        listener = nil
-        isRunning = false
+        // Cancelled with no lock held: `cancel()` completes asynchronously, and
+        // calling it under the lock would leave `port` and `isRunning`
+        // unreachable for however long Network.framework takes to get round to
+        // it — the shape of bug this whole type was reviewed for.
+        detachListener()?.cancel()
         log.write("router stopped")
+    }
+
+    // MARK: Lifecycle state
+
+    /// Take the router for a start, or throw if a start already holds it.
+    private func claimStart() throws {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        guard !_claiming, !_isRunning else { throw RouterError.alreadyRunning(_port) }
+        _claiming = true
+    }
+
+    /// Record a bind that succeeded.
+    private func commitStart(port: UInt16, listener: NWListener) {
+        lifecycleLock.lock()
+        _port = port
+        _listener = listener
+        _isRunning = true
+        _claiming = false
+        lifecycleLock.unlock()
+    }
+
+    /// Give back a claim whose bind did not complete.
+    ///
+    /// Without this a start that failed would hold the router forever: the
+    /// claim is what refuses the next `start()`, so one failed bind would make
+    /// the router unstartable for the life of the process.
+    private func abandonStart() {
+        lifecycleLock.lock()
+        _claiming = false
+        _listener = nil
+        lifecycleLock.unlock()
+    }
+
+    /// Mark the router stopped and hand the listener back, so the caller can
+    /// cancel it outside the lock.
+    private func detachListener() -> NWListener? {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        _isRunning = false
+        let current = _listener
+        _listener = nil
+        return current
     }
 
     public var baseURL: String { "http://127.0.0.1:\(port)" }
