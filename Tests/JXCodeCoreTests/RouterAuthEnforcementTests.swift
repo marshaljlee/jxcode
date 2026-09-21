@@ -341,6 +341,41 @@ final class RouterAuthEnforcementTests: XCTestCase {
         XCTAssertEqual(v1Health.statusCode, 200)
     }
 
+    /// `/health` is the one endpoint that answers without a credential, so the
+    /// origin check is the *only* thing in front of it — and what it answers
+    /// with is the provider, its kind and its base URL, which is a local
+    /// enumeration of the user's configured endpoints. Worth reporting to the
+    /// app, and safe only because this holds.
+    func testACrossOriginRequestCannotReachHealth() async throws {
+        let harness = try RouterHarness()
+        let (body, response) = try await harness.send(
+            "/health", method: "GET", headers: ["Origin": "https://example.com"]
+        )
+
+        XCTAssertEqual(
+            response.statusCode, 403,
+            "an unauthenticated endpoint answered a cross-origin request"
+        )
+        XCTAssertTrue(
+            String(decoding: body, as: UTF8.self).contains("cross-origin"),
+            "the refusal should say why: \(String(decoding: body, as: UTF8.self))"
+        )
+    }
+
+    /// The gate runs ahead of auth, so a cross-origin request does not reach a
+    /// route it would otherwise be allowed to use.
+    func testACrossOriginRequestIsRefusedEvenWithAValidToken() async throws {
+        let harness = try securedHarness()
+        let (_, response) = try await harness.send(
+            "/v1/messages",
+            body: nonStreamingAnthropicRequest,
+            headers: ["x-api-key": routerToken, "Origin": "https://example.com"]
+        )
+
+        XCTAssertEqual(response.statusCode, 403)
+        XCTAssertTrue(harness.upstream.requests.isEmpty, "the request reached the upstream")
+    }
+
     /// The gate is read per request, so turning auth on takes effect without a
     /// restart.
     func testEnablingAuthAfterStartTakesEffectOnTheNextRequest() async throws {

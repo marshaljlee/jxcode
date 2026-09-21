@@ -15,6 +15,12 @@ public struct SVGPoint: Equatable {
     }
 
     public static let zero = SVGPoint(x: 0, y: 0)
+
+    /// Whether both coordinates are finite numbers.
+    ///
+    /// One that is not is still a valid value — it is what a zero radius or an
+    /// overflowing one produces — so a caller has to ask rather than assume.
+    public var isFinite: Bool { x.isFinite && y.isFinite }
 }
 
 /// One drawing step of a parsed SVG path.
@@ -287,6 +293,7 @@ public enum SVGPathParser {
 
         var rx = abs(rawRX)
         var ry = abs(rawRY)
+        // No radii at all is a straight line, which is what the spec says.
         guard rx > 0, ry > 0 else { return [.line(to)] }
 
         let cosPhi = cos(rotation)
@@ -302,6 +309,13 @@ public enum SVGPathParser {
         // the spec, rather than producing an impossible ellipse.
         var rx2 = rx * rx
         var ry2 = ry * ry
+        // A radius whose square overflows is not one this arithmetic can use:
+        // `1e200²` is infinity. Nothing below traps on it — the two clamps eat
+        // the NaN, because a comparison against NaN is false and so `max(0,
+        // x)` hands back the `0` — which is what turns it into points at 1e200
+        // instead of an error.
+        guard rx2.isFinite, ry2.isFinite else { return [.line(to)] }
+
         let x12 = x1 * x1
         let y12 = y1 * y1
         let lambda = x12 / rx2 + y12 / ry2
@@ -341,6 +355,20 @@ public enum SVGPathParser {
 
         if !sweep, sweepAngle > 0 { sweepAngle -= 2 * .pi }
         if sweep, sweepAngle < 0 { sweepAngle += 2 * .pi }
+
+        // Every number the geometry below is built from, checked once. Any of
+        // them can still overflow or cancel to NaN on the way here — a radius
+        // of `1e-200` squares to zero, so `lambda` is infinity and the scale-up
+        // makes the radius infinite; an infinite rotation makes `cos` NaN — and
+        // NaN geometry renders as nothing at all while looking like valid data.
+        // A degenerate arc is a straight line.
+        //
+        // Checked here rather than on the way in because this is where the
+        // answers exist: one guard on the computed values covers every route,
+        // where a guard on the arguments has to enumerate them.
+        guard sweepAngle.isFinite, cx.isFinite, cy.isFinite,
+              rx.isFinite, ry.isFinite
+        else { return [.line(to)] }
 
         let slices = max(1, Int(ceil(abs(sweepAngle) / (.pi / 2))))
         let delta = sweepAngle / Double(slices)

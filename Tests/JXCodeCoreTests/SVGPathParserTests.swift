@@ -133,6 +133,49 @@ final class SVGPathParserTests: XCTestCase {
         )
     }
 
+    /// Radii that overflow are not numbers the arc maths can use. Squaring
+    /// `1e200` gives infinity, and the step after that is `inf - inf`, which is
+    /// NaN — and `Int(ceil(NaN))` traps, taking the process with it.
+    ///
+    /// Nothing shipped hits this today: the only caller parses compiled-in icon
+    /// data. It is here because "only internal data reaches this" is the kind of
+    /// assumption that stops being true quietly, and the failure is a crash
+    /// rather than a wrong-looking curve.
+    func testArcWithRadiiThatOverflowBecomesALine() {
+        XCTAssertEqual(
+            SVGPathParser.parse("M0 0A1e200 1e200 0 0 1 5 5"),
+            [.move(SVGPoint(x: 0, y: 0)), .line(SVGPoint(x: 5, y: 5))]
+        )
+    }
+
+    /// The mirror case: a radius that *underflows* to zero when squared makes
+    /// `lambda` infinite, and the spec's scale-up then makes the radius
+    /// infinite.
+    func testArcWithRadiiThatUnderflowBecomesALine() {
+        XCTAssertEqual(
+            SVGPathParser.parse("M0 0A1e-200 1e-200 0 0 1 5 5"),
+            [.move(SVGPoint(x: 0, y: 0)), .line(SVGPoint(x: 5, y: 5))]
+        )
+    }
+
+    /// An infinite rotation is the same trap by a different route: `cos(inf)` is
+    /// NaN, and every value below is derived from it.
+    func testArcWithANonFiniteRotationBecomesALine() {
+        XCTAssertEqual(
+            SVGPathParser.parse("M0 0A5 5 1e400 0 1 5 5"),
+            [.move(SVGPoint(x: 0, y: 0)), .line(SVGPoint(x: 5, y: 5))]
+        )
+    }
+
+    /// So is a non-finite endpoint, which reaches the same arithmetic from the
+    /// other side.
+    func testArcWithANonFiniteEndpointBecomesALine() {
+        XCTAssertEqual(
+            SVGPathParser.parse("M1e400 0A5 5 0 0 1 5 5"),
+            [.move(SVGPoint(x: 1e400, y: 0)), .line(SVGPoint(x: 5, y: 5))]
+        )
+    }
+
     func testArcProducesFiniteGeometry() {
         let nodes = SVGPathParser.parse("M0 0A10 10 0 0 1 20 0")
         for node in nodes {
