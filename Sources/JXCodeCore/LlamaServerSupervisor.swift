@@ -140,14 +140,27 @@ public final class LlamaServer: @unchecked Sendable {
     private let paths: SandboxPaths
     private let environment: SandboxEnvironment
 
-    private var process: Process?
-    private var logHandle: FileHandle?
-
     /// All mutable state is touched only from this queue, which is what makes
     /// the `@unchecked Sendable` above sound.
+    ///
+    /// It used not to be true. `start()` wrote `state`, `process` and
+    /// `logHandle` from whichever task it was resumed on — and it has `await`
+    /// points, so that is not one thread — while `isProcessAlive` read `state`
+    /// through this queue. A queue protects a field only if *every* access goes
+    /// through it, so this was guarding the read and nothing else. `State` is a
+    /// non-atomic enum, and the readers are not idle: `jxcode serve` spins on
+    /// `state.isRunning` and the app's health poll runs every five seconds.
     private let queue = DispatchQueue(label: "app.jxcode.llama-server")
 
-    public private(set) var state: State = .stopped
+    private var process: Process?
+    private var logHandle: FileHandle?
+    private var _state: State = .stopped
+    private var _resolvedCapabilities: LlamaServerCapabilities?
+
+    /// Read through the queue. Callers already inside a `queue.sync` block must
+    /// use `_state` directly: re-entering `sync` on the queue you are running on
+    /// is a trap, not a wait — libdispatch aborts the process.
+    public var state: State { queue.sync { _state } }
 
     public init(
         configuration: LlamaServerConfiguration,
@@ -166,7 +179,9 @@ public final class LlamaServer: @unchecked Sendable {
     ///
     /// `nil` before the first start. Useful when a load fails: the assumed set
     /// and the real set are the first thing to compare.
-    public private(set) var resolvedCapabilities: LlamaServerCapabilities?
+    public var resolvedCapabilities: LlamaServerCapabilities? {
+        queue.sync { _resolvedCapabilities }
+    }
 
     // MARK: Starting
 
@@ -182,7 +197,7 @@ public final class LlamaServer: @unchecked Sendable {
         // argument and exit before it loads a model.
         let resolved = await LlamaServerCapabilities.probe(binary: configuration.binary)
             ?? configuration.capabilities
-        resolvedCapabilities = resolved
+        queue.sync { _resolvedCapabilities = resolved }
 
         let process = Process()
         process.executableURL = configuration.binary
@@ -204,14 +219,19 @@ public final class LlamaServer: @unchecked Sendable {
         process.standardError = handle
         process.standardInput = FileHandle.nullDevice
 
-        self.logHandle = handle
-        self.process = process
-        state = .starting
+        // `self.` is not decoration here: the closure also captures the local
+        // `process`, and without it `process = process` resolves to the local
+        // `let` rather than the field.
+        queue.sync {
+            self.logHandle = handle
+            self.process = process
+            self._state = .starting
+        }
 
         do {
             try process.run()
         } catch {
-            state = .failed("\(error)")
+            queue.sync { _state = .failed("\(error)") }
             try? handle.close()
             throw LlamaServerError.launchFailed("\(error)")
         }
@@ -224,11 +244,11 @@ public final class LlamaServer: @unchecked Sendable {
             // A server that never became healthy is of no use, and leaving it
             // running would hold its memory until the app exits.
             stop()
-            state = .failed("\(error)")
+            queue.sync { _state = .failed("\(error)") }
             throw error
         }
 
-        state = .running(port: configuration.port, pid: pid)
+        queue.sync { _state = .running(port: configuration.port, pid: pid) }
     }
 
     private func waitUntilHealthy(process: Process) async throws {
@@ -289,7 +309,7 @@ public final class LlamaServer: @unchecked Sendable {
         guard let process = running else {
             queue.sync {
                 cleanup()
-                state = .stopped
+                _state = .stopped
             }
             return
         }
@@ -310,10 +330,12 @@ public final class LlamaServer: @unchecked Sendable {
 
         queue.sync {
             cleanup()
-            state = .stopped
+            _state = .stopped
         }
     }
 
+    /// Called only from inside a `queue.sync` block — it touches `process` and
+    /// `logHandle`, which is what makes that requirement more than a convention.
     private func cleanup() {
         try? logHandle?.close()
         logHandle = nil
@@ -406,17 +428,22 @@ public final class LlamaServer: @unchecked Sendable {
     /// can never answer again, and the caller needs to say so rather than
     /// showing a spinner forever.
     public var isProcessAlive: Bool {
-        queue.sync { state.isRunning }
+        queue.sync { _state.isRunning }
     }
 
     deinit {
         // Last line of defence against an orphaned server holding memory. The
         // app also stops servers explicitly; this covers the paths where it
         // does not get the chance.
+        // Read through the queue here too. `start()` may still be running on
+        // another task when the last reference goes away, and deinit is the one
+        // place that cannot call `stop()` to do it properly — the object is
+        // already being torn down.
+        let (process, handle) = queue.sync { (self.process, self.logHandle) }
         if let process, process.isRunning {
             process.terminate()
         }
-        try? logHandle?.close()
+        try? handle?.close()
     }
 }
 

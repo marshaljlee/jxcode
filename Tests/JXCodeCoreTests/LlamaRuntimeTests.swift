@@ -657,6 +657,60 @@ final class LlamaServerSupervisorTests: XCTestCase {
         XCTAssertFalse(tail.contains("line 0 "), "and must not reach back to the start")
     }
 
+    func testResolvedCapabilitiesIsRecordedWhenStartRuns() async {
+        // `resolvedCapabilities` is written from `start()`, which now does it
+        // under the queue. This pins that the guarded write still happens —
+        // a queue.sync dropped on the floor would leave it nil forever, and
+        // nothing else in the suite would notice.
+        let configuration = self.configuration(binary: URL(fileURLWithPath: "/usr/bin/false"), timeout: 2)
+        let server = LlamaServer(configuration: configuration, paths: SandboxPaths(root: root))
+
+        try? await server.start()
+
+        XCTAssertEqual(
+            server.resolvedCapabilities,
+            configuration.capabilities,
+            "a binary that reports nothing should fall back to the configured set"
+        )
+    }
+
+    /// Read the state from several threads while a start is in flight.
+    ///
+    /// `start()` has `await` points, so it writes `state` from a different task
+    /// than the one that called it. Under the thread sanitizer this reports a
+    /// race if any write escapes the queue; without it, it can only assert the
+    /// reads stay consistent — which is why the fix is a queue discipline
+    /// rather than something this test proves on its own.
+    func testStateIsReadableWhileAnotherTaskStartsTheServer() async {
+        let server = LlamaServer(
+            configuration: configuration(binary: URL(fileURLWithPath: "/usr/bin/false"), timeout: 2),
+            paths: SandboxPaths(root: root)
+        )
+        let counter = Counter()
+        let readerCount = 6
+        let group = DispatchGroup()
+
+        for _ in 0..<readerCount {
+            DispatchQueue.global().async(group: group) {
+                while !counter.isDone {
+                    _ = server.state
+                    _ = server.isProcessAlive
+                    _ = server.resolvedCapabilities
+                }
+                counter.increment()
+            }
+        }
+
+        try? await server.start()
+        counter.markDone()
+        group.wait()
+
+        XCTAssertEqual(counter.value, readerCount, "readers did not finish")
+        if case .failed = server.state {} else {
+            XCTFail("the fake server cannot become healthy, was \(server.state)")
+        }
+    }
+
     func testFailureMessageIncludesTheLog() async throws {
         // The log is where llama-server says why it refused to start, so the
         // error has to carry it — otherwise the user sees "failed" and nothing
@@ -679,5 +733,37 @@ final class LlamaServerSupervisorTests: XCTestCase {
                 "the error should carry the server's own output: \(error)"
             )
         }
+    }
+
+}
+
+/// Counts readers, and tells them when to stop, from several threads at once.
+private final class Counter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    private var done = false
+
+    func increment() {
+        lock.lock()
+        count += 1
+        lock.unlock()
+    }
+
+    func markDone() {
+        lock.lock()
+        done = true
+        lock.unlock()
+    }
+
+    var isDone: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return done
+    }
+
+    var value: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return count
     }
 }
