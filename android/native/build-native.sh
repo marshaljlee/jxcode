@@ -17,7 +17,13 @@ NDK="$(ls -d "$ANDROID_HOME"/ndk/* 2>/dev/null | sort -V | tail -1)"
 [ -n "$NDK" ] || { echo "error: no NDK under $ANDROID_HOME/ndk" >&2; exit 1; }
 
 API=29
-TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/darwin-x86_64"
+HOST_OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+if [ "$HOST_OS" = "linux" ]; then
+    HOST_PLATFORM="linux-x86_64"
+else
+    HOST_PLATFORM="darwin-x86_64"
+fi
+TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/$HOST_PLATFORM"
 CLANG="$TOOLCHAIN/bin/aarch64-linux-android${API}-clang"
 CLANGXX="$TOOLCHAIN/bin/aarch64-linux-android${API}-clang++"
 OUT="$(pwd)/../app/src/main/jniLibs/arm64-v8a"

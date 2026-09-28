@@ -26,10 +26,14 @@ NDK = os.environ.get(
     "ANDROID_NDK_HOME",
     os.path.expanduser("~/Library/Android/sdk/ndk/28.2.13676358"),
 )
+import platform
+host_os = platform.system().lower()
+host_platform = "linux-x86_64" if host_os == "linux" else "darwin-x86_64"
+
 READELF = os.path.join(
-    NDK, "toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-readelf"
+    NDK, f"toolchains/llvm/prebuilt/{host_platform}/bin/llvm-readelf"
 )
-STRIP = os.path.join(NDK, "toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-strip")
+STRIP = os.path.join(NDK, f"toolchains/llvm/prebuilt/{host_platform}/bin/llvm-strip")
 
 # Supplied by the platform, never packaged.
 SYSTEM = {

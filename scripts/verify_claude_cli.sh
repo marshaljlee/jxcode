@@ -17,7 +17,7 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 JXCODE="$ROOT/.build/debug/jxcode"
-PY="${PYTHON:-/Users/joshua/.workbuddy-ai/binaries/python/versions/3.13.12/bin/python3}"
+PY="${PYTHON:-$(which python3 || echo python3)}"
 CLAUDE="${CLAUDE_BIN:-$HOME/.local/bin/claude}"
 
 if [[ ! -x "$JXCODE" ]]; then

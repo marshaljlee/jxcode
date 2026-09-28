@@ -177,7 +177,7 @@ private fun SpawnChip(
                 shape = chipShape
             )
             .clickable(onClick = onSpawn)
-            .padding(horizontal = 10.dp, vertical = 5.dp),
+            .padding(horizontal = 12.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
@@ -337,7 +337,7 @@ private fun ModifierKeys(onSend: (String) -> Unit) {
                     .clip(RoundedCornerShape(7.dp))
                     .background(Palette.surfaceElevated)
                     .clickable { onSend(sequence) }
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text(label, fontSize = Type.body, color = Palette.textSecondary)

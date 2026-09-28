@@ -149,10 +149,23 @@ object NodeRuntime {
         }
     }
 
+    private fun resolveShell(): String {
+        val termuxBash = File("/data/data/com.termux/files/usr/bin/bash")
+        if (termuxBash.exists() && termuxBash.canExecute()) {
+            return termuxBash.absolutePath
+        }
+        val termuxSh = File("/data/data/com.termux/files/usr/bin/sh")
+        if (termuxSh.exists() && termuxSh.canExecute()) {
+            return termuxSh.absolutePath
+        }
+        return "/system/bin/sh"
+    }
+
     private fun script(directory: File, name: String, body: String) {
         val file = File(directory, name)
         runCatching {
-            file.writeText("#!/system/bin/sh\n$body")
+            val shell = resolveShell()
+            file.writeText("#!$shell\n$body")
             file.setExecutable(true, false)
         }.onFailure { Log.w(TAG, "could not write ${file.absolutePath}", it) }
     }

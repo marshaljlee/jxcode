@@ -259,7 +259,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
      * `/system/bin/sh` inside the npm bin directory.
      */
     fun agentCommand(id: String): String? {
-        if (id == "shell") return "/system/bin/sh"
+        if (id == "shell") {
+            return com.jxcode.android.terminal.TermuxShell.resolveShell()
+        }
         val direct = File(File(SandboxHome.home(app), ".npm-global/bin"), id)
         if (direct.exists() && direct.canExecute()) return direct.absolutePath
         return resolveOnPath(id)
@@ -301,7 +303,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
         _installingAgentIDs.value = _installingAgentIDs.value + agent.id
         _installFailures.value = _installFailures.value - agent.id
-        spawnShellCommand("$install && exec ${agent.command}")
+
+        // Termux adaptation: if a native binary installer is provided, or if the
+        // environment supports pkg, dynamically branch to use Termux's pkg install.
+        // Currently, all built-in agents use npm, which works cross-platform thanks
+        // to the bundled Termux Node.js runtime.
+        val termuxPkg = File("/data/data/com.termux/files/usr/bin/pkg")
+        val isNpm = install.startsWith("npm i ")
+
+        val actualInstall = if (!isNpm && termuxPkg.exists() && termuxPkg.canExecute()) {
+            "pkg install -y ${agent.id}"
+        } else {
+            install
+        }
+
+        spawnShellCommand("$actualInstall && exec ${agent.command}")
     }
 
     fun clearInstallState(id: String) {
@@ -311,8 +327,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun spawnShellCommand(script: String, rows: Int = 24, cols: Int = 80) {
         session.stop()
+        val shell = com.jxcode.android.terminal.TermuxShell.resolveShell()
         val started = session.start(
-            command = "/system/bin/sh",
+            command = shell,
             args = arrayOf("-c", script),
             env = spawnEnvironment(),
             cwd = SandboxHome.home(app).absolutePath

@@ -89,10 +89,22 @@ object AgentRegistry {
         AgentDefinition(
             id = "shell",
             name = "Plain shell",
-            command = "/system/bin/sh",
+            command = resolveShell(),
             routerBinding = RouterBinding.None
         )
     )
+
+    private fun resolveShell(): String {
+        val termuxBash = File("/data/data/com.termux/files/usr/bin/bash")
+        if (termuxBash.exists() && termuxBash.canExecute()) {
+            return termuxBash.absolutePath
+        }
+        val termuxSh = File("/data/data/com.termux/files/usr/bin/sh")
+        if (termuxSh.exists() && termuxSh.canExecute()) {
+            return termuxSh.absolutePath
+        }
+        return "/system/bin/sh"
+    }
 
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
 

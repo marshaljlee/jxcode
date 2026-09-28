@@ -24,7 +24,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
-PYTHON="${PYTHON:-/Users/joshua/.workbuddy-ai/binaries/python/versions/3.13.12/bin/python3}"
+PYTHON="${PYTHON:-$(which python3 || echo python3)}"
 
 DEBS="$HERE/node-deb/debs"
 WORK="$HERE/runtime"
