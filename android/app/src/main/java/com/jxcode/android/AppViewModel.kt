@@ -304,19 +304,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _installingAgentIDs.value = _installingAgentIDs.value + agent.id
         _installFailures.value = _installFailures.value - agent.id
 
-        // Termux adaptation: if a native binary installer is provided, or if the
-        // environment supports pkg, dynamically branch to use Termux's pkg install.
-        // Currently, all built-in agents use npm, which works cross-platform thanks
-        // to the bundled Termux Node.js runtime.
         val termuxPkg = File("/data/data/com.termux/files/usr/bin/pkg")
         val isNpm = install.startsWith("npm i ")
-
         val actualInstall = if (!isNpm && termuxPkg.exists() && termuxPkg.canExecute()) {
             "pkg install -y ${agent.id}"
         } else {
             install
         }
-
         spawnShellCommand("$actualInstall && exec ${agent.command}")
     }
 

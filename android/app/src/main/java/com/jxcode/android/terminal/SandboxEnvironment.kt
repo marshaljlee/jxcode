@@ -69,7 +69,7 @@ object SandboxEnvironment {
             "COLORTERM" to "truecolor",
             "LANG" to "C.UTF-8",
             "LC_ALL" to "C.UTF-8",
-            "SHELL" to resolveShell(),
+            "SHELL" to com.jxcode.android.terminal.TermuxShell.resolveShell(),
             "PWD" to home,
             // npm installs into the sandbox instead of a system prefix.
             "npm_config_prefix" to File(home, ".npm-global").absolutePath,
@@ -111,17 +111,5 @@ object SandboxEnvironment {
 
         environment.putAll(extra)
         return environment.map { "${it.key}=${it.value}" }.toTypedArray()
-    }
-
-    private fun resolveShell(): String {
-        val termuxBash = File("/data/data/com.termux/files/usr/bin/bash")
-        if (termuxBash.exists() && termuxBash.canExecute()) {
-            return termuxBash.absolutePath
-        }
-        val termuxSh = File("/data/data/com.termux/files/usr/bin/sh")
-        if (termuxSh.exists() && termuxSh.canExecute()) {
-            return termuxSh.absolutePath
-        }
-        return "/system/bin/sh"
     }
 }
